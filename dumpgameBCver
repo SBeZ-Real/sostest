@@ -1,0 +1,3029 @@
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local MarketplaceService = game:GetService("MarketplaceService")
+local CoreGui = game:GetService("CoreGui")
+local TextService = game:GetService("TextService")
+local UserInputService = game:GetService("UserInputService")
+
+local localPlayer = Players.LocalPlayer
+local debugLib = debug
+
+local decompileFunc = type(decompile) == "function" and decompile or nil
+local getBytecodeFunc = type(getscriptbytecode) == "function" and getscriptbytecode
+    or type(get_script_bytecode) == "function" and get_script_bytecode
+    or type(dumpstring) == "function" and dumpstring
+    or nil
+
+local getScriptClosureFunc = type(getscriptclosure) == "function" and getscriptclosure
+    or type(get_script_closure) == "function" and get_script_closure
+    or nil
+
+local writeFile = type(writefile) == "function" and writefile or nil
+local appendFile = type(appendfile) == "function" and appendfile or nil
+local makeFolder = type(makefolder) == "function" and makefolder or nil
+local isFolder = type(isfolder) == "function" and isfolder or nil
+local isFile = type(isfile) == "function" and isfile or nil
+
+local setClipboardFunc = type(setclipboard) == "function" and setclipboard
+    or type(toclipboard) == "function" and toclipboard
+    or type(writeclipboard) == "function" and writeclipboard
+    or (Clipboard and type(Clipboard.set) == "function" and Clipboard.set)
+    or nil
+
+local getNil = type(getnilinstances) == "function" and getnilinstances or function()
+    return {}
+end
+
+local getModules = type(getloadedmodules) == "function" and getloadedmodules or function()
+    return {}
+end
+
+local getInfo = debugLib and type(debugLib.getinfo) == "function" and debugLib.getinfo
+    or type(getinfo) == "function" and getinfo
+    or nil
+
+local getConsts = debugLib and type(debugLib.getconstants) == "function" and debugLib.getconstants
+    or type(getconstants) == "function" and getconstants
+    or nil
+
+local getUpvals = debugLib and type(debugLib.getupvalues) == "function" and debugLib.getupvalues
+    or type(getupvalues) == "function" and getupvalues
+    or nil
+
+local COLORS = {
+    Background = Color3.fromRGB(8, 12, 20),
+    Panel = Color3.fromRGB(14, 20, 32),
+    PanelAlt = Color3.fromRGB(18, 27, 42),
+    PanelHover = Color3.fromRGB(24, 36, 56),
+    PanelSelected = Color3.fromRGB(20, 38, 62),
+    Border = Color3.fromRGB(30, 48, 74),
+    BorderGlow = Color3.fromRGB(0, 140, 255),
+    Blue = Color3.fromRGB(0, 140, 255),
+    BlueLight = Color3.fromRGB(65, 175, 255),
+    BlueDark = Color3.fromRGB(0, 80, 150),
+    Text = Color3.fromRGB(235, 242, 252),
+    TextMuted = Color3.fromRGB(140, 158, 182),
+    TextDim = Color3.fromRGB(85, 105, 130),
+    Success = Color3.fromRGB(45, 210, 125),
+    Warning = Color3.fromRGB(245, 175, 45),
+    Error = Color3.fromRGB(245, 70, 80),
+    ThreatHigh = Color3.fromRGB(255, 60, 75),
+    ThreatMedium = Color3.fromRGB(255, 160, 40),
+    ThreatLow = Color3.fromRGB(80, 190, 255),
+    ThreatUnscanned = Color3.fromRGB(110, 125, 145),
+    ThreatFailed = Color3.fromRGB(215, 95, 135)
+}
+
+local function computeHash(str)
+    if type(str) ~= "string" or #str == 0 then
+        return "00000000"
+    end
+    local h = 2166136261
+    for i = 1, #str do
+        h = bit32.bxor(h, string.byte(str, i))
+        local low = bit32.band(h, 0xFFFF)
+        local high = bit32.rshift(h, 16)
+        local mul_low = low * 16777619
+        local mul_high = high * 16777619
+        h = bit32.band(mul_low + bit32.lshift(bit32.band(mul_high, 0xFFFF), 16), 0xFFFFFFFF)
+    end
+    return string.format("%08x", h)
+end
+
+local function cleanString(value)
+    local result = tostring(value or ""):gsub('[\\/:*?"<>|%c]', "_")
+    result = result:gsub("%s+$", "")
+    if #result > 60 then
+        result = result:sub(1, 60)
+    end
+    if result == "" then
+        return "Unnamed"
+    end
+    return result
+end
+
+local function quoteString(value)
+    local ok, result = pcall(function()
+        return HttpService:JSONEncode(tostring(value))
+    end)
+    if ok then
+        return result
+    end
+    return string.format("%q", tostring(value))
+end
+
+local function safeToString(value)
+    local valueType = type(value)
+    if valueType == "string" then
+        return quoteString(value)
+    end
+    if valueType == "number" or valueType == "boolean" or valueType == "nil" then
+        return tostring(value)
+    end
+    if typeof(value) == "Instance" then
+        local fullName = value.Name
+        pcall(function()
+            fullName = value:GetFullName()
+        end)
+        return string.format("Instance<%s>", fullName)
+    end
+    return valueType
+end
+
+local function wrapSource(code)
+    local level = 2
+    while true do
+        local closeToken = "]" .. string.rep("=", level) .. "]"
+        if not code:find(closeToken, 1, true) then
+            local openToken = "[" .. string.rep("=", level) .. "["
+            return openToken .. "\n" .. code .. "\n" .. closeToken
+        end
+        level = level + 1
+    end
+end
+
+local placeId = game.PlaceId
+local gameId = game.GameId
+local jobId = game.JobId
+local placeVersion = game.PlaceVersion
+
+local placeTitle = "RobloxGame"
+pcall(function()
+    local info = MarketplaceService:GetProductInfo(placeId)
+    if info and info.Name then
+        placeTitle = cleanString(info.Name)
+    end
+end)
+
+local rootDirectory = string.format("%s_%d_Dump", placeTitle, placeId)
+local masterFilePath = string.format("%s/%s_%d_MASTER.luau", rootDirectory, placeTitle, placeId)
+local manifestFilePath = string.format("%s/_MANIFEST.json", rootDirectory)
+local backdoorFilePath = string.format("%s/_BACKDOOR_REPORT.json", rootDirectory)
+local humanReportFilePath = string.format("%s/_BACKDOOR_REPORT.txt", rootDirectory)
+local exportDirectory = string.format("%s/Exports", rootDirectory)
+
+local function safeMakeDir(path)
+    if not makeFolder then
+        return false
+    end
+    local current = ""
+    for segment in path:gmatch("[^/\\]+") do
+        current = current == "" and segment or current .. "/" .. segment
+        local exists = false
+        if isFolder then
+            pcall(function()
+                exists = isFolder(current)
+            end)
+        end
+        if not exists then
+            local created = false
+            pcall(function()
+                makeFolder(current)
+                created = true
+            end)
+            if not created and isFolder then
+                pcall(function()
+                    exists = isFolder(current)
+                end)
+            end
+            if not exists and not isFolder then
+                return false
+            end
+        end
+    end
+    return true
+end
+
+local function fileExists(path)
+    if not isFile then
+        return false
+    end
+    local result = false
+    pcall(function()
+        result = isFile(path)
+    end)
+    return result
+end
+
+local function writeText(path, content)
+    if not writeFile then
+        return false, "WRITEFILE_UNAVAILABLE"
+    end
+    local ok, err = pcall(function()
+        writeFile(path, content)
+    end)
+    if not ok then
+        return false, tostring(err)
+    end
+    return true, nil
+end
+
+local function appendText(path, content)
+    if not appendFile then
+        return false, "APPENDFILE_UNAVAILABLE"
+    end
+    local ok, err = pcall(function()
+        appendFile(path, content)
+    end)
+    if not ok then
+        return false, tostring(err)
+    end
+    return true, nil
+end
+
+local function isDecompileValid(source)
+    if type(source) ~= "string" or #source == 0 then
+        return false
+    end
+    local lower = source:lower()
+    local invalidPatterns = {
+        "failed to decode",
+        "decompilation error",
+        "cannot decompile",
+        "decompiler error",
+        "custom vm",
+        "encode key",
+        "unable to decompile",
+        "an error occurred while decompiling"
+    }
+    for _, pattern in ipairs(invalidPatterns) do
+        if lower:find(pattern, 1, true) then
+            return false
+        end
+    end
+    return true
+end
+
+local function inspectFunction(fn, depth, visited)
+    depth = depth or 0
+    visited = visited or {}
+    if depth > 2 then
+        return "function() end"
+    end
+    if type(fn) ~= "function" or visited[fn] then
+        return "function() end"
+    end
+    visited[fn] = true
+
+    local pad = string.rep("    ", depth)
+    local innerPad = string.rep("    ", depth + 1)
+    local lines = {}
+
+    local info = {}
+    if getInfo then
+        pcall(function()
+            info = getInfo(fn) or {}
+        end)
+    end
+
+    local functionName = info.name
+    if type(functionName) ~= "string" or functionName == "" then
+        functionName = "anonymous"
+    end
+
+    local numParams = tonumber(info.numparams) or 0
+    local parameters = {}
+    for i = 1, numParams do
+        table.insert(parameters, "arg" .. i)
+    end
+    if info.is_vararg == 1 then
+        table.insert(parameters, "...")
+    end
+
+    table.insert(lines, string.format("%sfunction %s(%s)", pad, cleanString(functionName), table.concat(parameters, ", ")))
+
+    local constants = {}
+    if getConsts then
+        pcall(function()
+            constants = getConsts(fn) or {}
+        end)
+    end
+    if #constants > 0 then
+        table.insert(lines, innerPad .. "local CONSTANTS = {")
+        for index, value in pairs(constants) do
+            table.insert(lines, string.format("%s    [%s] = %s,", innerPad, tostring(index), safeToString(value)))
+        end
+        table.insert(lines, innerPad .. "}")
+    end
+
+    local upvalues = {}
+    if getUpvals then
+        pcall(function()
+            upvalues = getUpvals(fn) or {}
+        end)
+    end
+    if #upvalues > 0 then
+        table.insert(lines, innerPad .. "local UPVALUES = {")
+        for index, value in pairs(upvalues) do
+            local formatted
+            if type(value) == "function" then
+                formatted = inspectFunction(value, depth + 2, visited)
+            else
+                formatted = safeToString(value)
+            end
+            table.insert(lines, string.format("%s    [%s] = %s,", innerPad, tostring(index), formatted))
+        end
+        table.insert(lines, innerPad .. "}")
+    end
+
+    table.insert(lines, pad .. "end")
+    return table.concat(lines, "\n")
+end
+
+local function resolveSource(inst)
+    if decompileFunc then
+        local ok, result = pcall(function()
+            return decompileFunc(inst)
+        end)
+        if ok and isDecompileValid(result) then
+            return result, "DECOMPILED"
+        end
+    end
+
+    local source = ""
+    local sourceOk = pcall(function()
+        source = inst.Source
+    end)
+    if sourceOk and isDecompileValid(source) then
+        return source, "SOURCE"
+    end
+
+    if getScriptClosureFunc then
+        local closureOk, closure = pcall(function()
+            return getScriptClosureFunc(inst)
+        end)
+        if closureOk and type(closure) == "function" then
+            local reconstructed = inspectFunction(closure, 0, {})
+            if type(reconstructed) == "string" and #reconstructed > 0 then
+                return reconstructed, "RECONSTRUCTED_CLOSURE"
+            end
+        end
+    end
+
+    if getBytecodeFunc then
+        local bytecode
+        pcall(function()
+            bytecode = getBytecodeFunc(inst)
+        end)
+        if type(bytecode) == "string" and #bytecode > 0 then
+            return string.format("local raw_bytecode = %q", bytecode), "RAW_BYTECODE"
+        end
+    end
+
+    return "return nil", "FAILED"
+end
+
+local function isOtherPlayerDescendant(inst)
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= localPlayer then
+            local character = player.Character
+            if character then
+                local inside = false
+                pcall(function()
+                    inside = inst:IsDescendantOf(character)
+                end)
+                if inside then
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
+
+local function isSystemInternal(inst)
+    local current = inst
+    while current do
+        local name = current.Name
+        if name == "CorePackages" or name == "CoreGui" or name == "RobloxGui" or name == "RobloxReplicatedStorage" then
+            return true
+        end
+        current = current.Parent
+    end
+    return false
+end
+
+local function getHierarchy(inst)
+    local parts = {}
+    local current = inst.Parent
+    while current and current ~= game do
+        table.insert(parts, 1, cleanString(current.Name))
+        current = current.Parent
+    end
+    return parts
+end
+
+local function getClassName(inst)
+    local result = "Unknown"
+    pcall(function()
+        result = inst.ClassName
+    end)
+    return result
+end
+
+local function getSafeCanonicalId(inst, origin)
+    local fullName = ""
+    local ok = pcall(function()
+        fullName = inst:GetFullName()
+    end)
+    if ok and fullName ~= "" then
+        return fullName
+    end
+    local hierarchy = getHierarchy(inst)
+    return string.format("[%s]:%s/%s", origin, table.concat(hierarchy, "/"), cleanString(inst.Name))
+end
+
+local function buildDeterministicPath(origin, hierarchy, scriptName)
+    local parts = { rootDirectory, cleanString(origin) }
+    for _, item in ipairs(hierarchy) do
+        table.insert(parts, cleanString(item))
+    end
+    table.insert(parts, cleanString(scriptName))
+    return table.concat(parts, "/")
+end
+
+local function makeFileHeader(entry, code)
+    local lines = {
+        "--------------------------------------------------------------------------------",
+        "Generated by Colors - Blue",
+        "--------------------------------------------------------------------------------",
+        string.format("SCRIPT_NAME   = %s", quoteString(entry.Instance.Name)),
+        string.format("CLASS         = %s", quoteString(getClassName(entry.Instance))),
+        string.format("ORIGIN        = %s", quoteString(entry.Origin)),
+        string.format("CANONICAL_ID  = %s", quoteString(entry.CanonicalId)),
+        string.format("PATH          = %s", quoteString(entry.FullPath)),
+        string.format("METHOD        = %s", quoteString(entry.Method or "PENDING")),
+        string.format("THREAT_LEVEL  = %s", quoteString(entry.Threat and entry.Threat.Level or "UNSCANNED")),
+        string.format("SOURCE_LENGTH = %d", (entry.Method == "FAILED" or entry.Hash == "UNAVAILABLE") and 0 or #code),
+        string.format("HASH          = %s", quoteString(entry.Hash or (entry.Method == "FAILED" and "UNAVAILABLE" or computeHash(code)))),
+        "DATA_BEGIN"
+    }
+    return table.concat(lines, "\n")
+end
+
+local EXACT_SUSPICIOUS_NAMES = {
+    ["ss"] = 25,
+    ["c2"] = 30,
+    ["backdoor"] = 35,
+    ["serverside"] = 35,
+    ["moonsec"] = 30,
+    ["cmdbar"] = 25,
+    ["remoteexecutor"] = 40,
+    ["payload"] = 30,
+    ["hscripts"] = 25
+}
+
+local EXACT_PREFIX_NAMES = {
+    ["ss_"] = 20,
+    ["c2_"] = 20,
+    ["backdoor_"] = 25,
+    ["serverside_"] = 25,
+    ["infect_"] = 25
+}
+
+local DANGEROUS_CALL_PATTERNS = {
+    { pattern = "getfenv%s*%(%s*%)%s*%[%s*[\"']loadstring[\"']%s*%]", weight = 100, desc = "Dynamic getfenv loadstring vector" },
+    { pattern = "getfenv%s*%(%s*%)%s*%[%s*[\"']require[\"']%s*%]", weight = 90, desc = "Dynamic getfenv require bypass" },
+    { pattern = "setfenv%s*%(%s*%w+%s*,%s*getfenv%s*%(%s*%)%s*%)", weight = 60, desc = "Environment overwrite injection" },
+    { pattern = "https?://discord%.com/api/webhooks/%d+/[%w%-_]+", weight = 85, desc = "Hardcoded Discord Webhook data exfiltration" },
+    { pattern = "https?://discordapp%.com/api/webhooks/%d+/[%w%-_]+", weight = 85, desc = "Hardcoded DiscordApp Webhook data exfiltration" },
+    { pattern = "loadstring%s*%(%s*game%s*:%s*HttpGet%s*%(%s*[\"'][^\"']+[\"']%s*%)%s*%)", weight = 95, desc = "Direct HTTP script payload execution" }
+}
+
+local KNOWN_LEGIT_MODULE_ASSETS = {
+    [601040375] = true,
+    [1048385566] = true,
+    [704088781] = true,
+    [153243169] = true,
+    [292439477] = true
+}
+
+local function analyzeBackdoorThreat(inst, content, method)
+    if method == "FAILED" then
+        return {
+            Score = 0,
+            Level = "ANALYSIS_FAILED",
+            Confidence = "NONE",
+            AnalysisComplete = false,
+            Reasons = {
+                {
+                    Score = 0,
+                    Desc = "Source extraction failed (bytecode stripped or protected)",
+                    Line = nil
+                }
+            }
+        }
+    end
+
+    local score = 0
+    local reasons = {}
+    local lowerName = inst.Name:lower():gsub("%s+", "")
+
+    if EXACT_SUSPICIOUS_NAMES[lowerName] then
+        score = score + EXACT_SUSPICIOUS_NAMES[lowerName]
+        table.insert(reasons, {
+            Score = EXACT_SUSPICIOUS_NAMES[lowerName],
+            Desc = string.format("Object name signature matched: %s", inst.Name),
+            Line = nil
+        })
+    else
+        for prefix, weight in pairs(EXACT_PREFIX_NAMES) do
+            if lowerName:sub(1, #prefix) == prefix then
+                score = score + weight
+                table.insert(reasons, {
+                    Score = weight,
+                    Desc = string.format("Object prefix signature matched: %s", prefix),
+                    Line = nil
+                })
+                break
+            end
+        end
+    end
+
+    if inst:IsA("RemoteEvent") or inst:IsA("RemoteFunction") or inst:IsA("UnreliableRemoteEvent") then
+        local parentName = inst.Parent and inst.Parent.ClassName or "None"
+        if parentName == "JointsService" or parentName == "TestService" or parentName == "NullService" then
+            score = score + 45
+            table.insert(reasons, {
+                Score = 45,
+                Desc = string.format("Remote concealed inside non-standard container: %s", parentName),
+                Line = nil
+            })
+        end
+        if lowerName == "execute" or lowerName == "run" or lowerName == "eval" or lowerName == "payload" then
+            score = score + 40
+            table.insert(reasons, {
+                Score = 40,
+                Desc = string.format("Remote identifier indicates command dispatch: %s", inst.Name),
+                Line = nil
+            })
+        end
+    end
+
+    if type(content) == "string" and #content > 0 then
+        local lineArray = {}
+        for line in content:gmatch("([^\r\n]*)[\r\n]?") do
+            table.insert(lineArray, line)
+        end
+
+        for _, rule in ipairs(DANGEROUS_CALL_PATTERNS) do
+            local matchedLine = nil
+            for lineIdx, lineText in ipairs(lineArray) do
+                if lineText:find(rule.pattern) then
+                    matchedLine = lineIdx
+                    break
+                end
+            end
+            if matchedLine then
+                score = score + rule.weight
+                table.insert(reasons, {
+                    Score = rule.weight,
+                    Desc = rule.desc,
+                    Line = matchedLine
+                })
+            end
+        end
+
+        for lineIdx, lineText in ipairs(lineArray) do
+            for assetIdStr in lineText:gmatch("require%s*%(%s*(%d+)%s*%)") do
+                local assetId = tonumber(assetIdStr)
+                if assetId and not KNOWN_LEGIT_MODULE_ASSETS[assetId] then
+                    score = score + 20
+                    table.insert(reasons, {
+                        Score = 20,
+                        Desc = string.format("External AssetId require loader: require(%d)", assetId),
+                        Line = lineIdx
+                    })
+                end
+            end
+        end
+
+        if content:find("MoonSecV") or content:find("Luraph") or content:find("IronBrew") then
+            local hasNetwork = content:find("HttpService") or content:find("MarketplaceService") or content:find("Players")
+            if hasNetwork then
+                score = score + 65
+                table.insert(reasons, {
+                    Score = 65,
+                    Desc = "Obfuscated wrapper combined with engine runtime access",
+                    Line = nil
+                })
+            end
+        end
+    end
+
+    local level = "CLEAN"
+    if score >= 80 then
+        level = "HIGH"
+    elseif score >= 40 then
+        level = "MEDIUM"
+    elseif score > 0 then
+        level = "LOW"
+    end
+
+    return {
+        Score = score,
+        Level = level,
+        Confidence = "HEURISTIC",
+        AnalysisComplete = true,
+        Reasons = reasons
+    }
+end
+
+local function buildReasonFingerprint(threat)
+    if not threat or not threat.Reasons or #threat.Reasons == 0 then
+        return ""
+    end
+    local parts = {}
+    for _, reason in ipairs(threat.Reasons) do
+        table.insert(parts, string.format("%s:%s:%s", tostring(reason.Score), tostring(reason.Desc), tostring(reason.Line or 0)))
+    end
+    table.sort(parts)
+    return table.concat(parts, "|")
+end
+
+local AppState = {
+    ScanMode = "SMART",
+    SeverityFilter = "ALL",
+    SearchQuery = "",
+    Registry = {},
+    RegistryCache = {},
+    FilteredRegistry = {},
+    Selected = nil,
+    InspectorTab = "DETAILS",
+    IsRunning = false,
+    History = {},
+    LastSnapshot = nil,
+    LastTargetedResult = nil,
+    Stats = {
+        TotalScripts = 0,
+        TotalRemotes = 0,
+        Clean = 0,
+        Low = 0,
+        Medium = 0,
+        High = 0,
+        Failed = 0,
+        Unscanned = 0
+    }
+}
+
+local function formatAuditSummaryReport(report)
+    local lines = {}
+    table.insert(lines, "================================================================================")
+    table.insert(lines, "COLORS - BLUE BACKDOOR REPORT")
+    table.insert(lines, "================================================================================")
+    table.insert(lines, string.format("GAME TITLE        : %s", report.GameTitle))
+    table.insert(lines, string.format("PLACE ID          : %d", report.PlaceId))
+    table.insert(lines, string.format("CHECK MODE        : %s", report.ScanMode))
+    table.insert(lines, string.format("SCOPE             : %s", report.Scope))
+    table.insert(lines, string.format("TIMESTAMP         : %s", report.ScanTimestamp))
+    table.insert(lines, string.format("DURATION          : %.2f seconds", report.DurationSeconds))
+    table.insert(lines, "--------------------------------------------------------------------------------")
+    table.insert(lines, "CHECK STATISTICS")
+    table.insert(lines, "--------------------------------------------------------------------------------")
+    table.insert(lines, string.format("TOTAL TARGETS     : %d", report.TotalScriptsScanned))
+    table.insert(lines, string.format("TOTAL REMOTES     : %d", report.TotalRemotesScanned))
+    table.insert(lines, string.format("CLEAN             : %d", report.AuditSummary.CleanThreatCount))
+    table.insert(lines, string.format("LOW THREAT        : %d", report.AuditSummary.LowThreatCount))
+    table.insert(lines, string.format("MEDIUM THREAT     : %d", report.AuditSummary.MediumThreatCount))
+    table.insert(lines, string.format("HIGH THREAT       : %d", report.AuditSummary.HighThreatCount))
+    table.insert(lines, string.format("ANALYSIS FAILED   : %d", report.AuditSummary.AnalysisFailedCount))
+    table.insert(lines, string.format("UNSCANNED         : %d", report.AuditSummary.UnscannedCount))
+    table.insert(lines, "--------------------------------------------------------------------------------")
+    table.insert(lines, "FLAGGED SCRIPTS")
+    table.insert(lines, "--------------------------------------------------------------------------------")
+    if #report.SuspiciousScripts == 0 then
+        table.insert(lines, "No suspicious scripts identified by heuristic baseline rules.")
+    else
+        for idx, item in ipairs(report.SuspiciousScripts) do
+            table.insert(lines, string.format("[%d] %s (%s) - Threat: %s (%d)", idx, item.Name, item.Path, item.Level, item.Score))
+            for _, r in ipairs(item.Reasons) do
+                table.insert(lines, string.format("    + %s", r.Desc))
+            end
+        end
+    end
+    table.insert(lines, "--------------------------------------------------------------------------------")
+    table.insert(lines, "FLAGGED REMOTES")
+    table.insert(lines, "--------------------------------------------------------------------------------")
+    if #report.SuspiciousRemotes == 0 then
+        table.insert(lines, "No suspicious network remotes detected.")
+    else
+        for idx, item in ipairs(report.SuspiciousRemotes) do
+            table.insert(lines, string.format("[%d] %s (%s) - Threat: %s (%d)", idx, item.Name, item.Path, item.Level, item.Score))
+            for _, r in ipairs(item.Reasons) do
+                table.insert(lines, string.format("    + %s", r.Desc))
+            end
+        end
+    end
+    table.insert(lines, "================================================================================")
+    table.insert(lines, "Generated by Colors - Blue")
+    table.insert(lines, "================================================================================")
+    return table.concat(lines, "\n")
+end
+
+local parentGui
+if type(gethui) == "function" then
+    parentGui = gethui()
+elseif CoreGui:FindFirstChild("RobloxGui") then
+    parentGui = CoreGui
+else
+    parentGui = localPlayer:WaitForChild("PlayerGui")
+end
+
+local oldGui = parentGui:FindFirstChild("ColorsBlueAdvancedInterface")
+if oldGui then
+    oldGui:Destroy()
+end
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "ColorsBlueAdvancedInterface"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.Parent = parentGui
+
+local uiScale = Instance.new("UIScale")
+uiScale.Scale = 1
+uiScale.Parent = screenGui
+
+local function updateScale()
+    local viewport = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
+    if viewport.X < 1200 or viewport.Y < 700 then
+        uiScale.Scale = math.clamp(math.min(viewport.X / 1280, viewport.Y / 760), 0.75, 1)
+    else
+        uiScale.Scale = 1
+    end
+end
+updateScale()
+if workspace.CurrentCamera then
+    workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateScale)
+end
+
+local toggleBadge = Instance.new("TextButton")
+toggleBadge.Name = "ToggleBadge"
+toggleBadge.Size = UDim2.new(0, 110, 0, 32)
+toggleBadge.Position = UDim2.new(0, 20, 0.5, -16)
+toggleBadge.BackgroundColor3 = COLORS.Panel
+toggleBadge.BorderSizePixel = 0
+toggleBadge.Text = "COLORS - BLUE"
+toggleBadge.TextColor3 = COLORS.BlueLight
+toggleBadge.TextSize = 10
+toggleBadge.Font = Enum.Font.GothamBold
+toggleBadge.Visible = false
+toggleBadge.Parent = screenGui
+
+local toggleCorner = Instance.new("UICorner")
+toggleCorner.CornerRadius = UDim.new(0, 6)
+toggleCorner.Parent = toggleBadge
+
+local toggleStroke = Instance.new("UIStroke")
+toggleStroke.Color = COLORS.BorderGlow
+toggleStroke.Thickness = 1
+toggleStroke.Parent = toggleBadge
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 840, 0, 520)
+mainFrame.Position = UDim2.new(0.5, -420, 0.5, -260)
+mainFrame.BackgroundColor3 = COLORS.Background
+mainFrame.BorderSizePixel = 0
+mainFrame.ClipsDescendants = true
+mainFrame.Parent = screenGui
+
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 8)
+mainCorner.Parent = mainFrame
+
+local mainStroke = Instance.new("UIStroke")
+mainStroke.Color = COLORS.Border
+mainStroke.Thickness = 1
+mainStroke.Parent = mainFrame
+
+local topBar = Instance.new("Frame")
+topBar.Name = "TopBar"
+topBar.Size = UDim2.new(1, 0, 0, 50)
+topBar.BackgroundColor3 = COLORS.Panel
+topBar.BorderSizePixel = 0
+topBar.Parent = mainFrame
+
+local topCorner = Instance.new("UICorner")
+topCorner.CornerRadius = UDim.new(0, 8)
+topCorner.Parent = topBar
+
+local topAccent = Instance.new("Frame")
+topAccent.Size = UDim2.new(1, 0, 0, 2)
+topAccent.Position = UDim2.new(0, 0, 1, -2)
+topAccent.BackgroundColor3 = COLORS.Blue
+topAccent.BorderSizePixel = 0
+topAccent.Parent = topBar
+
+local brandLogo = Instance.new("TextLabel")
+brandLogo.Size = UDim2.new(0, 36, 0, 36)
+brandLogo.Position = UDim2.new(0, 10, 0, 7)
+brandLogo.BackgroundColor3 = COLORS.PanelAlt
+brandLogo.BorderSizePixel = 0
+brandLogo.Text = "CB"
+brandLogo.TextColor3 = COLORS.BlueLight
+brandLogo.TextSize = 13
+brandLogo.Font = Enum.Font.GothamBold
+brandLogo.Parent = topBar
+
+local brandLogoCorner = Instance.new("UICorner")
+brandLogoCorner.CornerRadius = UDim.new(0, 6)
+brandLogoCorner.Parent = brandLogo
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(0, 250, 0, 20)
+titleLabel.Position = UDim2.new(0, 54, 0, 7)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "Colors - Blue"
+titleLabel.TextColor3 = COLORS.Text
+titleLabel.TextSize = 14
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.Parent = topBar
+
+local subtitleLabel = Instance.new("TextLabel")
+subtitleLabel.Size = UDim2.new(0, 350, 0, 16)
+subtitleLabel.Position = UDim2.new(0, 54, 0, 26)
+subtitleLabel.BackgroundTransparency = 1
+subtitleLabel.Text = string.format("%s | PlaceId: %d | JobId: %s", placeTitle, placeId, tostring(jobId):sub(1, 14))
+subtitleLabel.TextColor3 = COLORS.TextMuted
+subtitleLabel.TextSize = 9
+subtitleLabel.Font = Enum.Font.Gotham
+subtitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+subtitleLabel.Parent = topBar
+
+local topActionsContainer = Instance.new("Frame")
+topActionsContainer.Size = UDim2.new(0, 220, 0, 30)
+topActionsContainer.Position = UDim2.new(1, -290, 0, 10)
+topActionsContainer.BackgroundTransparency = 1
+topActionsContainer.Parent = topBar
+
+local managedButtons = {}
+
+local function registerManagedButton(btn)
+    table.insert(managedButtons, {
+        Button = btn
+    })
+    return btn
+end
+
+local function setBusyState(busy)
+    AppState.IsRunning = busy
+    for _, item in ipairs(managedButtons) do
+        local btn = item.Button
+        btn.Active = not busy
+        btn.AutoButtonColor = false
+        local stroke = btn:FindFirstChildOfClass("UIStroke")
+        if stroke then
+            stroke.Transparency = busy and 0.6 or 0
+        end
+        for _, child in ipairs(btn:GetChildren()) do
+            if child:IsA("TextLabel") then
+                child.TextTransparency = busy and 0.45 or 0
+            end
+        end
+        if btn:IsA("TextButton") and btn.Text ~= "" then
+            btn.TextTransparency = busy and 0.45 or 0
+        end
+    end
+end
+
+local function createTopPill(text, posX, width, cb)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, width, 0, 28)
+    btn.Position = UDim2.new(0, posX, 0, 0)
+    btn.BackgroundColor3 = COLORS.PanelAlt
+    btn.BorderSizePixel = 0
+    btn.Text = text
+    btn.TextColor3 = COLORS.TextMuted
+    btn.TextSize = 9
+    btn.Font = Enum.Font.GothamBold
+    btn.AutoButtonColor = false
+    btn.Parent = topActionsContainer
+
+    local bCorner = Instance.new("UICorner")
+    bCorner.CornerRadius = UDim.new(0, 4)
+    bCorner.Parent = btn
+
+    local bStroke = Instance.new("UIStroke")
+    bStroke.Color = COLORS.Border
+    bStroke.Thickness = 1
+    bStroke.Parent = btn
+
+    btn.MouseEnter:Connect(function()
+        if not AppState.IsRunning then
+            btn.BackgroundColor3 = COLORS.PanelHover
+            bStroke.Color = COLORS.BlueLight
+        end
+    end)
+    btn.MouseLeave:Connect(function()
+        if not AppState.IsRunning then
+            btn.BackgroundColor3 = COLORS.PanelAlt
+            bStroke.Color = COLORS.Border
+        end
+    end)
+    btn.MouseButton1Click:Connect(cb)
+    return registerManagedButton(btn)
+end
+
+local minBtn = Instance.new("TextButton")
+minBtn.Size = UDim2.new(0, 28, 0, 28)
+minBtn.Position = UDim2.new(1, -64, 0, 11)
+minBtn.BackgroundColor3 = COLORS.PanelAlt
+minBtn.BorderSizePixel = 0
+minBtn.Text = "-"
+minBtn.TextColor3 = COLORS.TextMuted
+minBtn.TextSize = 14
+minBtn.Font = Enum.Font.GothamBold
+minBtn.Parent = topBar
+
+local minCorner = Instance.new("UICorner")
+minCorner.CornerRadius = UDim.new(0, 4)
+minCorner.Parent = minBtn
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 28, 0, 28)
+closeBtn.Position = UDim2.new(1, -32, 0, 11)
+closeBtn.BackgroundColor3 = COLORS.PanelAlt
+closeBtn.BorderSizePixel = 0
+closeBtn.Text = "X"
+closeBtn.TextColor3 = COLORS.TextMuted
+closeBtn.TextSize = 11
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.Parent = topBar
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 4)
+closeCorner.Parent = closeBtn
+
+local isDragging = false
+local dragStartPos = nil
+local frameStartPos = nil
+
+topBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        isDragging = true
+        dragStartPos = input.Position
+        frameStartPos = mainFrame.Position
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if isDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStartPos
+        mainFrame.Position = UDim2.new(
+            frameStartPos.X.Scale,
+            frameStartPos.X.Offset + delta.X,
+            frameStartPos.Y.Scale,
+            frameStartPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        isDragging = false
+    end
+end)
+
+local function setInterfaceVisible(visible)
+    mainFrame.Visible = visible
+    toggleBadge.Visible = not visible
+end
+
+minBtn.MouseButton1Click:Connect(function()
+    setInterfaceVisible(false)
+end)
+
+closeBtn.MouseButton1Click:Connect(function()
+    setInterfaceVisible(false)
+end)
+
+toggleBadge.MouseButton1Click:Connect(function()
+    setInterfaceVisible(true)
+end)
+
+UserInputService.InputBegan:Connect(function(input, processed)
+    if not processed and input.KeyCode == Enum.KeyCode.RightControl then
+        setInterfaceVisible(not mainFrame.Visible)
+    end
+end)
+
+local modalOverlay = Instance.new("Frame")
+modalOverlay.Size = UDim2.new(1, 0, 1, 0)
+modalOverlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+modalOverlay.BackgroundTransparency = 0.5
+modalOverlay.BorderSizePixel = 0
+modalOverlay.Visible = false
+modalOverlay.ZIndex = 20
+modalOverlay.Parent = mainFrame
+
+local modalDialog = Instance.new("Frame")
+modalDialog.Size = UDim2.new(0, 480, 0, 300)
+modalDialog.Position = UDim2.new(0.5, -240, 0.5, -150)
+modalDialog.BackgroundColor3 = COLORS.Panel
+modalDialog.BorderSizePixel = 0
+modalDialog.ZIndex = 21
+modalDialog.Parent = modalOverlay
+
+local modalCorner = Instance.new("UICorner")
+modalCorner.CornerRadius = UDim.new(0, 8)
+modalCorner.Parent = modalDialog
+
+local modalStroke = Instance.new("UIStroke")
+modalStroke.Color = COLORS.BorderGlow
+modalStroke.Thickness = 1
+modalStroke.Parent = modalDialog
+
+local modalTitle = Instance.new("TextLabel")
+modalTitle.Size = UDim2.new(1, -20, 0, 30)
+modalTitle.Position = UDim2.new(0, 10, 0, 10)
+modalTitle.BackgroundTransparency = 1
+modalTitle.Text = "MODAL TITLE"
+modalTitle.TextColor3 = COLORS.BlueLight
+modalTitle.TextSize = 12
+modalTitle.Font = Enum.Font.GothamBold
+modalTitle.TextXAlignment = Enum.TextXAlignment.Left
+modalTitle.ZIndex = 22
+modalTitle.Parent = modalDialog
+
+local modalBody = Instance.new("ScrollingFrame")
+modalBody.Size = UDim2.new(1, -20, 1, -85)
+modalBody.Position = UDim2.new(0, 10, 0, 40)
+modalBody.BackgroundColor3 = COLORS.Background
+modalBody.BorderSizePixel = 0
+modalBody.ScrollBarThickness = 3
+modalBody.ZIndex = 22
+modalBody.Parent = modalDialog
+
+local modalBodyCorner = Instance.new("UICorner")
+modalBodyCorner.CornerRadius = UDim.new(0, 4)
+modalBodyCorner.Parent = modalBody
+
+local modalBodyText = Instance.new("TextLabel")
+modalBodyText.Size = UDim2.new(1, -12, 0, 100)
+modalBodyText.Position = UDim2.new(0, 6, 0, 6)
+modalBodyText.BackgroundTransparency = 1
+modalBodyText.Text = ""
+modalBodyText.TextColor3 = COLORS.Text
+modalBodyText.TextSize = 9
+modalBodyText.Font = Enum.Font.Gotham
+modalBodyText.TextWrapped = true
+modalBodyText.TextXAlignment = Enum.TextXAlignment.Left
+modalBodyText.TextYAlignment = Enum.TextYAlignment.Top
+modalBodyText.ZIndex = 23
+modalBodyText.Parent = modalBody
+
+local modalActionBtn = Instance.new("TextButton")
+modalActionBtn.Size = UDim2.new(0, 140, 0, 30)
+modalActionBtn.Position = UDim2.new(1, -260, 1, -38)
+modalActionBtn.BackgroundColor3 = COLORS.Blue
+modalActionBtn.BorderSizePixel = 0
+modalActionBtn.Text = "CONFIRM"
+modalActionBtn.TextColor3 = COLORS.Text
+modalActionBtn.TextSize = 9
+modalActionBtn.Font = Enum.Font.GothamBold
+modalActionBtn.ZIndex = 22
+modalActionBtn.Parent = modalDialog
+
+local modalActionCorner = Instance.new("UICorner")
+modalActionCorner.CornerRadius = UDim.new(0, 4)
+modalActionCorner.Parent = modalActionBtn
+
+local modalCloseBtn = Instance.new("TextButton")
+modalCloseBtn.Size = UDim2.new(0, 100, 0, 30)
+modalCloseBtn.Position = UDim2.new(1, -110, 1, -38)
+modalCloseBtn.BackgroundColor3 = COLORS.PanelAlt
+modalCloseBtn.BorderSizePixel = 0
+modalCloseBtn.Text = "CLOSE"
+modalCloseBtn.TextColor3 = COLORS.TextMuted
+modalCloseBtn.TextSize = 9
+modalCloseBtn.Font = Enum.Font.GothamBold
+modalCloseBtn.ZIndex = 22
+modalCloseBtn.Parent = modalDialog
+
+local modalCloseCorner = Instance.new("UICorner")
+modalCloseCorner.CornerRadius = UDim.new(0, 4)
+modalCloseCorner.Parent = modalCloseBtn
+
+local modalActionConnection = nil
+
+local function hideModal()
+    if modalActionConnection then
+        modalActionConnection:Disconnect()
+        modalActionConnection = nil
+    end
+    modalOverlay.Visible = false
+end
+modalCloseBtn.MouseButton1Click:Connect(hideModal)
+
+local subHeader = Instance.new("Frame")
+subHeader.Size = UDim2.new(1, -28, 0, 32)
+subHeader.Position = UDim2.new(0, 14, 0, 56)
+subHeader.BackgroundTransparency = 1
+subHeader.Parent = mainFrame
+
+local modeSelector = Instance.new("Frame")
+modeSelector.Size = UDim2.new(0, 240, 1, 0)
+modeSelector.BackgroundColor3 = COLORS.Panel
+modeSelector.BorderSizePixel = 0
+modeSelector.Parent = subHeader
+
+local modeCorner = Instance.new("UICorner")
+modeCorner.CornerRadius = UDim.new(0, 5)
+modeCorner.Parent = modeSelector
+
+local modeStroke = Instance.new("UIStroke")
+modeStroke.Color = COLORS.Border
+modeStroke.Thickness = 1
+modeStroke.Parent = modeSelector
+
+local modeButtons = {}
+local function createModeButton(text, modeKey, posX, width)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, width, 1, -4)
+    btn.Position = UDim2.new(0, posX, 0, 2)
+    btn.BackgroundColor3 = (AppState.ScanMode == modeKey) and COLORS.BlueDark or COLORS.Panel
+    btn.BorderSizePixel = 0
+    btn.Text = text
+    btn.TextColor3 = (AppState.ScanMode == modeKey) and COLORS.Text or COLORS.TextDim
+    btn.TextSize = 8
+    btn.Font = Enum.Font.GothamBold
+    btn.AutoButtonColor = false
+    btn.Parent = modeSelector
+
+    local bCorner = Instance.new("UICorner")
+    bCorner.CornerRadius = UDim.new(0, 4)
+    bCorner.Parent = btn
+
+    modeButtons[modeKey] = btn
+    return registerManagedButton(btn)
+end
+
+local smartModeBtn = createModeButton("SMART", "SMART", 2, 76)
+local fullModeBtn = createModeButton("FULL GAME", "FULL", 80, 80)
+local targetedModeBtn = createModeButton("TARGETED", "TARGETED", 162, 76)
+
+local statsOverview = Instance.new("TextLabel")
+statsOverview.Size = UDim2.new(1, -250, 1, 0)
+statsOverview.Position = UDim2.new(0, 250, 0, 0)
+statsOverview.BackgroundColor3 = COLORS.Panel
+statsOverview.BorderSizePixel = 0
+statsOverview.Text = "0 SCRIPTS   0 REMOTES\nCLEAN 0   LOW 0   MED 0   HIGH 0   FAIL 0"
+statsOverview.TextColor3 = COLORS.TextMuted
+statsOverview.TextSize = 8
+statsOverview.Font = Enum.Font.GothamBold
+statsOverview.Parent = subHeader
+
+local statsCorner = Instance.new("UICorner")
+statsCorner.CornerRadius = UDim.new(0, 5)
+statsCorner.Parent = statsOverview
+
+local statsStroke = Instance.new("UIStroke")
+statsStroke.Color = COLORS.Border
+statsStroke.Thickness = 1
+statsStroke.Parent = statsOverview
+
+local filterBar = Instance.new("Frame")
+filterBar.Size = UDim2.new(1, -28, 0, 28)
+filterBar.Position = UDim2.new(0, 14, 0, 92)
+filterBar.BackgroundTransparency = 1
+filterBar.Parent = mainFrame
+
+local searchContainer = Instance.new("Frame")
+searchContainer.Size = UDim2.new(0, 340, 1, 0)
+searchContainer.BackgroundColor3 = COLORS.Panel
+searchContainer.BorderSizePixel = 0
+searchContainer.Parent = filterBar
+
+local searchCorner = Instance.new("UICorner")
+searchCorner.CornerRadius = UDim.new(0, 4)
+searchCorner.Parent = searchContainer
+
+local searchStroke = Instance.new("UIStroke")
+searchStroke.Color = COLORS.Border
+searchStroke.Thickness = 1
+searchStroke.Parent = searchContainer
+
+local searchBox = Instance.new("TextBox")
+searchBox.Size = UDim2.new(1, -16, 1, 0)
+searchBox.Position = UDim2.new(0, 8, 0, 0)
+searchBox.BackgroundTransparency = 1
+searchBox.PlaceholderText = "Search by name, origin, class, path..."
+searchBox.PlaceholderColor3 = COLORS.TextDim
+searchBox.Text = ""
+searchBox.TextColor3 = COLORS.Text
+searchBox.TextSize = 9
+searchBox.Font = Enum.Font.Gotham
+searchBox.TextXAlignment = Enum.TextXAlignment.Left
+searchBox.ClearTextOnFocus = false
+searchBox.Parent = searchContainer
+
+local severityPillsContainer = Instance.new("Frame")
+severityPillsContainer.Size = UDim2.new(1, -350, 1, 0)
+severityPillsContainer.Position = UDim2.new(0, 350, 0, 0)
+severityPillsContainer.BackgroundTransparency = 1
+severityPillsContainer.Parent = filterBar
+
+local severityButtons = {}
+local function createSeverityButton(label, key, posX, width, color)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, width, 1, 0)
+    btn.Position = UDim2.new(0, posX, 0, 0)
+    btn.BackgroundColor3 = (AppState.SeverityFilter == key) and color or COLORS.Panel
+    btn.BorderSizePixel = 0
+    btn.Text = label
+    btn.TextColor3 = (AppState.SeverityFilter == key) and COLORS.Background or COLORS.TextMuted
+    btn.TextSize = 8
+    btn.Font = Enum.Font.GothamBold
+    btn.AutoButtonColor = false
+    btn.Parent = severityPillsContainer
+
+    local bCorner = Instance.new("UICorner")
+    bCorner.CornerRadius = UDim.new(0, 4)
+    bCorner.Parent = btn
+
+    local bStroke = Instance.new("UIStroke")
+    bStroke.Color = COLORS.Border
+    bStroke.Thickness = 1
+    bStroke.Parent = btn
+
+    severityButtons[key] = { Button = btn, Color = color }
+    return registerManagedButton(btn)
+end
+
+createSeverityButton("ALL", "ALL", 0, 42, COLORS.BlueLight)
+createSeverityButton("UNSCAN", "UNSCANNED", 45, 56, COLORS.ThreatUnscanned)
+createSeverityButton("CLEAN", "CLEAN", 104, 52, COLORS.Success)
+createSeverityButton("LOW", "LOW", 159, 42, COLORS.ThreatLow)
+createSeverityButton("MED", "MEDIUM", 204, 42, COLORS.ThreatMedium)
+createSeverityButton("HIGH", "HIGH", 249, 42, COLORS.ThreatHigh)
+createSeverityButton("FAIL", "ANALYSIS_FAILED", 294, 42, COLORS.ThreatFailed)
+
+local listFrame = Instance.new("ScrollingFrame")
+listFrame.Size = UDim2.new(0, 380, 0, 276)
+listFrame.Position = UDim2.new(0, 14, 0, 126)
+listFrame.BackgroundColor3 = COLORS.Panel
+listFrame.BorderSizePixel = 0
+listFrame.ScrollBarThickness = 4
+listFrame.ScrollBarImageColor3 = COLORS.BlueDark
+listFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+listFrame.Parent = mainFrame
+
+local listCorner = Instance.new("UICorner")
+listCorner.CornerRadius = UDim.new(0, 5)
+listCorner.Parent = listFrame
+
+local listStroke = Instance.new("UIStroke")
+listStroke.Color = COLORS.Border
+listStroke.Thickness = 1
+listStroke.Parent = listFrame
+
+local ROW_HEIGHT = 28
+local POOL_SIZE = 24
+local BUFFER = 4
+local rowPool = {}
+
+for i = 1, POOL_SIZE do
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, -8, 0, 26)
+    btn.BackgroundColor3 = COLORS.Panel
+    btn.BorderSizePixel = 0
+    btn.Text = ""
+    btn.AutoButtonColor = false
+    btn.Visible = false
+    btn.Parent = listFrame
+
+    local bCorner = Instance.new("UICorner")
+    bCorner.CornerRadius = UDim.new(0, 4)
+    bCorner.Parent = btn
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.new(1, -145, 1, 0)
+    nameLabel.Position = UDim2.new(0, 8, 0, 0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = ""
+    nameLabel.TextColor3 = COLORS.Text
+    nameLabel.TextSize = 9
+    nameLabel.Font = Enum.Font.GothamMedium
+    nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
+    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    nameLabel.Parent = btn
+
+    local threatTag = Instance.new("TextLabel")
+    threatTag.Size = UDim2.new(0, 58, 1, 0)
+    threatTag.Position = UDim2.new(1, -135, 0, 0)
+    threatTag.BackgroundTransparency = 1
+    threatTag.Text = ""
+    threatTag.TextColor3 = COLORS.ThreatUnscanned
+    threatTag.TextSize = 8
+    threatTag.Font = Enum.Font.GothamBold
+    threatTag.TextXAlignment = Enum.TextXAlignment.Right
+    threatTag.Parent = btn
+
+    local originTag = Instance.new("TextLabel")
+    originTag.Size = UDim2.new(0, 68, 1, 0)
+    originTag.Position = UDim2.new(1, -72, 0, 0)
+    originTag.BackgroundTransparency = 1
+    originTag.Text = ""
+    originTag.TextColor3 = COLORS.TextDim
+    originTag.TextSize = 8
+    originTag.Font = Enum.Font.Gotham
+    originTag.TextXAlignment = Enum.TextXAlignment.Right
+    originTag.Parent = btn
+
+    rowPool[i] = {
+        Button = btn,
+        NameLabel = nameLabel,
+        ThreatTag = threatTag,
+        OriginTag = originTag,
+        Entry = nil
+    }
+end
+
+local inspectorContainer = Instance.new("Frame")
+inspectorContainer.Size = UDim2.new(1, -418, 0, 276)
+inspectorContainer.Position = UDim2.new(0, 404, 0, 126)
+inspectorContainer.BackgroundColor3 = COLORS.Panel
+inspectorContainer.BorderSizePixel = 0
+inspectorContainer.Parent = mainFrame
+
+local inspectorCorner = Instance.new("UICorner")
+inspectorCorner.CornerRadius = UDim.new(0, 5)
+inspectorCorner.Parent = inspectorContainer
+
+local inspectorStroke = Instance.new("UIStroke")
+inspectorStroke.Color = COLORS.Border
+inspectorStroke.Thickness = 1
+inspectorStroke.Parent = inspectorContainer
+
+local inspectorTop = Instance.new("Frame")
+inspectorTop.Size = UDim2.new(1, 0, 0, 34)
+inspectorTop.BackgroundTransparency = 1
+inspectorTop.Parent = inspectorContainer
+
+local tabContainer = Instance.new("Frame")
+tabContainer.Size = UDim2.new(0, 220, 0, 26)
+tabContainer.Position = UDim2.new(0, 8, 0, 4)
+tabContainer.BackgroundTransparency = 1
+tabContainer.Parent = inspectorTop
+
+local tabButtons = {}
+local function createTabButton(text, tabKey, posX, width)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, width, 1, 0)
+    btn.Position = UDim2.new(0, posX, 0, 0)
+    btn.BackgroundColor3 = (AppState.InspectorTab == tabKey) and COLORS.PanelAlt or COLORS.Panel
+    btn.BorderSizePixel = 0
+    btn.Text = text
+    btn.TextColor3 = (AppState.InspectorTab == tabKey) and COLORS.BlueLight or COLORS.TextDim
+    btn.TextSize = 8
+    btn.Font = Enum.Font.GothamBold
+    btn.AutoButtonColor = false
+    btn.Parent = tabContainer
+
+    local bCorner = Instance.new("UICorner")
+    bCorner.CornerRadius = UDim.new(0, 4)
+    bCorner.Parent = btn
+
+    local bStroke = Instance.new("UIStroke")
+    bStroke.Color = (AppState.InspectorTab == tabKey) and COLORS.BlueDark or COLORS.Border
+    bStroke.Thickness = 1
+    bStroke.Parent = btn
+
+    tabButtons[tabKey] = { Button = btn, Stroke = bStroke }
+    return registerManagedButton(btn)
+end
+
+createTabButton("DETAILS", "DETAILS", 0, 68)
+createTabButton("CODE", "CODE", 72, 64)
+createTabButton("DETECTIONS", "DETECTIONS", 140, 78)
+
+local threatBadge = Instance.new("TextLabel")
+threatBadge.Size = UDim2.new(0, 120, 0, 22)
+threatBadge.Position = UDim2.new(1, -128, 0, 6)
+threatBadge.BackgroundColor3 = COLORS.PanelAlt
+threatBadge.BorderSizePixel = 0
+threatBadge.Text = "THREAT: UNSCANNED"
+threatBadge.TextColor3 = COLORS.ThreatUnscanned
+threatBadge.TextSize = 8
+threatBadge.Font = Enum.Font.GothamBold
+threatBadge.Parent = inspectorTop
+
+local threatCorner = Instance.new("UICorner")
+threatCorner.CornerRadius = UDim.new(0, 4)
+threatCorner.Parent = threatBadge
+
+local quickActionsBar = Instance.new("Frame")
+quickActionsBar.Size = UDim2.new(1, -16, 0, 24)
+quickActionsBar.Position = UDim2.new(0, 8, 0, 36)
+quickActionsBar.BackgroundTransparency = 1
+quickActionsBar.Parent = inspectorContainer
+
+local function createQuickActionBtn(text, posX, width, cb)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, width, 1, 0)
+    btn.Position = UDim2.new(0, posX, 0, 0)
+    btn.BackgroundColor3 = COLORS.PanelAlt
+    btn.BorderSizePixel = 0
+    btn.Text = text
+    btn.TextColor3 = COLORS.TextMuted
+    btn.TextSize = 8
+    btn.Font = Enum.Font.GothamBold
+    btn.AutoButtonColor = false
+    btn.Parent = quickActionsBar
+
+    local bCorner = Instance.new("UICorner")
+    bCorner.CornerRadius = UDim.new(0, 3)
+    bCorner.Parent = btn
+
+    local bStroke = Instance.new("UIStroke")
+    bStroke.Color = COLORS.Border
+    bStroke.Thickness = 1
+    bStroke.Parent = btn
+
+    btn.MouseEnter:Connect(function()
+        if not AppState.IsRunning then
+            btn.BackgroundColor3 = COLORS.PanelHover
+            bStroke.Color = COLORS.BlueLight
+        end
+    end)
+    btn.MouseLeave:Connect(function()
+        if not AppState.IsRunning then
+            btn.BackgroundColor3 = COLORS.PanelAlt
+            bStroke.Color = COLORS.Border
+        end
+    end)
+    btn.MouseButton1Click:Connect(cb)
+    return registerManagedButton(btn)
+end
+
+local copyCodeBtn = createQuickActionBtn("COPY CODE", 0, 85, function() end)
+local exportBtn = createQuickActionBtn("EXPORT", 90, 70, function() end)
+local copyPathBtn = createQuickActionBtn("COPY PATH", 165, 80, function() end)
+local rescanBtn = createQuickActionBtn("RESCAN", 250, 65, function() end)
+
+local tabContentFrame = Instance.new("Frame")
+tabContentFrame.Size = UDim2.new(1, -16, 1, -68)
+tabContentFrame.Position = UDim2.new(0, 8, 0, 64)
+tabContentFrame.BackgroundTransparency = 1
+tabContentFrame.Parent = inspectorContainer
+
+local detailsPanel = Instance.new("ScrollingFrame")
+detailsPanel.Size = UDim2.new(1, 0, 1, 0)
+detailsPanel.BackgroundColor3 = COLORS.Background
+detailsPanel.BorderSizePixel = 0
+detailsPanel.ScrollBarThickness = 3
+detailsPanel.Visible = true
+detailsPanel.Parent = tabContentFrame
+
+local detailsCorner = Instance.new("UICorner")
+detailsCorner.CornerRadius = UDim.new(0, 4)
+detailsCorner.Parent = detailsPanel
+
+local detailsText = Instance.new("TextLabel")
+detailsText.Size = UDim2.new(1, -16, 1, -16)
+detailsText.Position = UDim2.new(0, 8, 0, 8)
+detailsText.BackgroundTransparency = 1
+detailsText.Text = "SELECT A NODE TO INSPECT DETAILS"
+detailsText.TextColor3 = COLORS.TextDim
+detailsText.TextSize = 9
+detailsText.Font = Enum.Font.Gotham
+detailsText.TextWrapped = true
+detailsText.TextXAlignment = Enum.TextXAlignment.Left
+detailsText.TextYAlignment = Enum.TextYAlignment.Top
+detailsText.Parent = detailsPanel
+
+local codePanel = Instance.new("ScrollingFrame")
+codePanel.Size = UDim2.new(1, 0, 1, 0)
+codePanel.BackgroundColor3 = COLORS.Background
+codePanel.BorderSizePixel = 0
+codePanel.ScrollBarThickness = 3
+codePanel.Visible = false
+codePanel.Parent = tabContentFrame
+
+local codeCorner = Instance.new("UICorner")
+codeCorner.CornerRadius = UDim.new(0, 4)
+codeCorner.Parent = codePanel
+
+local codeText = Instance.new("TextLabel")
+codeText.Size = UDim2.new(1, -16, 1, -16)
+codeText.Position = UDim2.new(0, 8, 0, 8)
+codeText.BackgroundTransparency = 1
+codeText.Text = "No script selected."
+codeText.TextColor3 = COLORS.TextMuted
+codeText.TextSize = 9
+codeText.Font = Enum.Font.Code
+codeText.TextXAlignment = Enum.TextXAlignment.Left
+codeText.TextYAlignment = Enum.TextYAlignment.Top
+codeText.Parent = codePanel
+
+local detectionsPanel = Instance.new("ScrollingFrame")
+detectionsPanel.Size = UDim2.new(1, 0, 1, 0)
+detectionsPanel.BackgroundColor3 = COLORS.Background
+detectionsPanel.BorderSizePixel = 0
+detectionsPanel.ScrollBarThickness = 3
+detectionsPanel.Visible = false
+detectionsPanel.Parent = tabContentFrame
+
+local detectionsCorner = Instance.new("UICorner")
+detectionsCorner.CornerRadius = UDim.new(0, 4)
+detectionsCorner.Parent = detectionsPanel
+
+local detectionsLayout = Instance.new("UIListLayout")
+detectionsLayout.Padding = UDim.new(0, 4)
+detectionsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+detectionsLayout.Parent = detectionsPanel
+
+local progressBg = Instance.new("Frame")
+progressBg.Size = UDim2.new(1, -28, 0, 14)
+progressBg.Position = UDim2.new(0, 14, 0, 410)
+progressBg.BackgroundColor3 = COLORS.PanelAlt
+progressBg.BorderSizePixel = 0
+progressBg.Parent = mainFrame
+
+local progressBgCorner = Instance.new("UICorner")
+progressBgCorner.CornerRadius = UDim.new(0, 3)
+progressBgCorner.Parent = progressBg
+
+local progressFill = Instance.new("Frame")
+progressFill.Size = UDim2.new(0, 0, 1, 0)
+progressFill.BackgroundColor3 = COLORS.Blue
+progressFill.BorderSizePixel = 0
+progressFill.Parent = progressBg
+
+local progressFillCorner = Instance.new("UICorner")
+progressFillCorner.CornerRadius = UDim.new(0, 3)
+progressFillCorner.Parent = progressFill
+
+local percentLabel = Instance.new("TextLabel")
+percentLabel.Size = UDim2.new(1, 0, 1, 0)
+percentLabel.BackgroundTransparency = 1
+percentLabel.Text = "READY"
+percentLabel.TextColor3 = COLORS.Text
+percentLabel.TextSize = 8
+percentLabel.Font = Enum.Font.GothamBold
+percentLabel.Parent = progressBg
+
+local bottomControls = Instance.new("Frame")
+bottomControls.Size = UDim2.new(1, -28, 0, 42)
+bottomControls.Position = UDim2.new(0, 14, 0, 432)
+bottomControls.BackgroundTransparency = 1
+bottomControls.Parent = mainFrame
+
+local function makeActionBtn(text, subtext, posX, width, cb)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, width, 0, 38)
+    btn.Position = UDim2.new(0, posX, 0, 0)
+    btn.BackgroundColor3 = COLORS.Panel
+    btn.BorderSizePixel = 0
+    btn.Text = ""
+    btn.AutoButtonColor = false
+    btn.Parent = bottomControls
+
+    local bCorner = Instance.new("UICorner")
+    bCorner.CornerRadius = UDim.new(0, 5)
+    bCorner.Parent = btn
+
+    local bStroke = Instance.new("UIStroke")
+    bStroke.Color = COLORS.Border
+    bStroke.Thickness = 1
+    bStroke.Parent = btn
+
+    local mainT = Instance.new("TextLabel")
+    mainT.Size = UDim2.new(1, 0, 0, 16)
+    mainT.Position = UDim2.new(0, 0, 0, 4)
+    mainT.BackgroundTransparency = 1
+    mainT.Text = text
+    mainT.TextColor3 = COLORS.Text
+    mainT.TextSize = 9
+    mainT.Font = Enum.Font.GothamBold
+    mainT.Parent = btn
+
+    local descT = Instance.new("TextLabel")
+    descT.Size = UDim2.new(1, 0, 0, 12)
+    descT.Position = UDim2.new(0, 0, 0, 20)
+    descT.BackgroundTransparency = 1
+    descT.Text = subtext
+    descT.TextColor3 = COLORS.TextDim
+    descT.TextSize = 8
+    descT.Font = Enum.Font.Gotham
+    descT.Parent = btn
+
+    btn.MouseEnter:Connect(function()
+        if not AppState.IsRunning then
+            btn.BackgroundColor3 = COLORS.PanelHover
+            bStroke.Color = COLORS.BlueLight
+        end
+    end)
+    btn.MouseLeave:Connect(function()
+        if not AppState.IsRunning then
+            btn.BackgroundColor3 = COLORS.Panel
+            bStroke.Color = COLORS.Border
+        end
+    end)
+    btn.MouseButton1Click:Connect(cb)
+    return registerManagedButton(btn)
+end
+
+local updateVisibleRows
+local updatePreview
+local collectTargets
+local collectScriptTargets
+local collectRemoteTargets
+
+local function filterDataset()
+    AppState.FilteredRegistry = {}
+    local query = AppState.SearchQuery:lower():gsub("%s+", "")
+    for _, entry in ipairs(AppState.Registry) do
+        local threatLevel = entry.Threat and entry.Threat.Level or "UNSCANNED"
+        local matchFilter = (AppState.SeverityFilter == "ALL") or (AppState.SeverityFilter == threatLevel)
+        local matchSearch = true
+        if query ~= "" then
+            matchSearch = entry.SearchBlob:find(query, 1, true) ~= nil
+        end
+        if matchFilter and matchSearch then
+            table.insert(AppState.FilteredRegistry, entry)
+        end
+    end
+    listFrame.CanvasSize = UDim2.new(0, 0, 0, #AppState.FilteredRegistry * ROW_HEIGHT)
+    updateVisibleRows()
+end
+
+updateVisibleRows = function()
+    local totalItems = #AppState.FilteredRegistry
+    local scrollY = listFrame.CanvasPosition.Y
+    local rawIndex = math.floor(scrollY / ROW_HEIGHT) + 1
+    local startIndex = math.max(1, rawIndex - BUFFER)
+    
+    for i = 1, POOL_SIZE do
+        local itemIndex = startIndex + (i - 1)
+        local row = rowPool[i]
+        if itemIndex <= totalItems then
+            local entry = AppState.FilteredRegistry[itemIndex]
+            row.Entry = entry
+            row.Button.Position = UDim2.new(0, 4, 0, (itemIndex - 1) * ROW_HEIGHT)
+            row.Button.BackgroundColor3 = (AppState.Selected == entry) and COLORS.PanelSelected or COLORS.Panel
+            row.NameLabel.Text = string.format("%d. %s", itemIndex, cleanString(entry.Instance.Name))
+            row.NameLabel.TextColor3 = (AppState.Selected == entry) and COLORS.BlueLight or COLORS.Text
+            row.OriginTag.Text = entry.Origin:sub(1, 10)
+            
+            local threatLevel = entry.Threat and entry.Threat.Level or "UNSCANNED"
+            if threatLevel == "HIGH" then
+                row.ThreatTag.Text = "● HIGH"
+                row.ThreatTag.TextColor3 = COLORS.ThreatHigh
+            elseif threatLevel == "MEDIUM" then
+                row.ThreatTag.Text = "● MED"
+                row.ThreatTag.TextColor3 = COLORS.ThreatMedium
+            elseif threatLevel == "LOW" then
+                row.ThreatTag.Text = "● LOW"
+                row.ThreatTag.TextColor3 = COLORS.ThreatLow
+            elseif threatLevel == "CLEAN" then
+                row.ThreatTag.Text = "● CLEAN"
+                row.ThreatTag.TextColor3 = COLORS.Success
+            elseif threatLevel == "ANALYSIS_FAILED" then
+                row.ThreatTag.Text = "● FAIL"
+                row.ThreatTag.TextColor3 = COLORS.ThreatFailed
+            else
+                row.ThreatTag.Text = "● ?"
+                row.ThreatTag.TextColor3 = COLORS.ThreatUnscanned
+            end
+            row.Button.Visible = true
+        else
+            row.Entry = nil
+            row.Button.Visible = false
+        end
+    end
+end
+
+for i = 1, POOL_SIZE do
+    local row = rowPool[i]
+    row.Button.MouseButton1Click:Connect(function()
+        if row.Entry then
+            updatePreview(row.Entry)
+            updateVisibleRows()
+        end
+    end)
+end
+
+listFrame:GetPropertyChangedSignal("CanvasPosition"):Connect(updateVisibleRows)
+
+local function switchTab(tabKey)
+    AppState.InspectorTab = tabKey
+    for k, tabObj in pairs(tabButtons) do
+        local active = (k == tabKey)
+        tabObj.Button.BackgroundColor3 = active and COLORS.PanelAlt or COLORS.Panel
+        tabObj.Button.TextColor3 = active and COLORS.BlueLight or COLORS.TextDim
+        tabObj.Stroke.Color = active and COLORS.BlueDark or COLORS.Border
+    end
+    detailsPanel.Visible = (tabKey == "DETAILS")
+    codePanel.Visible = (tabKey == "CODE")
+    detectionsPanel.Visible = (tabKey == "DETECTIONS")
+    if AppState.Selected then
+        updatePreview(AppState.Selected)
+    end
+end
+
+for k, tabObj in pairs(tabButtons) do
+    tabObj.Button.MouseButton1Click:Connect(function()
+        switchTab(k)
+    end)
+end
+
+local function setMode(modeKey)
+    if AppState.IsRunning then return end
+    if modeKey == "TARGETED" and not AppState.Selected then
+        percentLabel.Text = "TARGETED MODE: PLEASE SELECT A SCRIPT FIRST"
+        return
+    end
+    AppState.ScanMode = modeKey
+    for k, btn in pairs(modeButtons) do
+        local active = (k == modeKey)
+        btn.BackgroundColor3 = active and COLORS.BlueDark or COLORS.Panel
+        btn.TextColor3 = active and COLORS.Text or COLORS.TextDim
+    end
+    if modeKey == "TARGETED" then
+        if AppState.Selected then
+            AppState.Registry = { AppState.Selected }
+            statsOverview.Text = string.format("1 SCRIPT   0 REMOTES\nTARGETED: %s", cleanString(AppState.Selected.Instance.Name))
+            filterDataset()
+        end
+    else
+        collectTargets()
+    end
+end
+
+smartModeBtn.MouseButton1Click:Connect(function() setMode("SMART") end)
+fullModeBtn.MouseButton1Click:Connect(function() setMode("FULL") end)
+targetedModeBtn.MouseButton1Click:Connect(function() setMode("TARGETED") end)
+
+local function setSeverityFilter(filterKey)
+    AppState.SeverityFilter = filterKey
+    for k, obj in pairs(severityButtons) do
+        local active = (k == filterKey)
+        obj.Button.BackgroundColor3 = active and obj.Color or COLORS.Panel
+        obj.Button.TextColor3 = active and COLORS.Background or COLORS.TextMuted
+    end
+    filterDataset()
+end
+
+for k, obj in pairs(severityButtons) do
+    obj.Button.MouseButton1Click:Connect(function()
+        setSeverityFilter(k)
+    end)
+end
+
+local function jumpToLine(lineNumber)
+    switchTab("CODE")
+    task.wait(0.05)
+    local totalLines = 1
+    for _ in (codeText.Text):gmatch("\n") do
+        totalLines = totalLines + 1
+    end
+    local targetRatio = math.clamp((lineNumber - 2) / math.max(1, totalLines), 0, 1)
+    local maxOffset = math.max(0, codePanel.CanvasSize.Y.Offset - codePanel.AbsoluteSize.Y)
+    codePanel.CanvasPosition = Vector2.new(0, targetRatio * maxOffset)
+end
+
+updatePreview = function(entry)
+    AppState.Selected = entry
+    if not entry then
+        detailsText.Text = "SELECT A NODE TO INSPECT DETAILS"
+        codeText.Text = "No script selected."
+        threatBadge.Text = "THREAT: UNSCANNED"
+        threatBadge.TextColor3 = COLORS.ThreatUnscanned
+        for _, c in ipairs(detectionsPanel:GetChildren()) do
+            if c:IsA("Frame") or c:IsA("TextLabel") then c:Destroy() end
+        end
+        return
+    end
+
+    local inst = entry.Instance
+    local code = entry.ResolvedCode or ""
+    local threat = entry.Threat
+
+    if not threat then
+        threatBadge.Text = "THREAT: UNSCANNED"
+        threatBadge.TextColor3 = COLORS.ThreatUnscanned
+    else
+        threatBadge.Text = string.format("THREAT: %s (%d)", threat.Level, threat.Score)
+        if threat.Level == "HIGH" then
+            threatBadge.TextColor3 = COLORS.ThreatHigh
+        elseif threat.Level == "MEDIUM" then
+            threatBadge.TextColor3 = COLORS.ThreatMedium
+        elseif threat.Level == "LOW" then
+            threatBadge.TextColor3 = COLORS.ThreatLow
+        elseif threat.Level == "ANALYSIS_FAILED" then
+            threatBadge.TextColor3 = COLORS.ThreatFailed
+        else
+            threatBadge.TextColor3 = COLORS.Success
+        end
+    end
+
+    if AppState.InspectorTab == "DETAILS" then
+        local indicatorStr = "UNSCANNED (RUN CHECKER TO ANALYZE)"
+        if threat then
+            if threat.Level == "ANALYSIS_FAILED" then
+                indicatorStr = "SOURCE RESOLUTION FAILED (INACCESSIBLE / STRIPPED)"
+            else
+                indicatorStr = (#threat.Reasons > 0) and string.format("%d Rules Triggered", #threat.Reasons) or "NO SUSPICIOUS INDICATORS DETECTED"
+            end
+        end
+        detailsText.Text = string.format(
+            "NAME: %s\nCLASS: %s\nORIGIN: %s\nCANONICAL ID: %s\nPATH: %s\nMETHOD: %s\nSOURCE SIZE: %s\nHASH: %s\n\nCONFIDENCE: %s\nANALYSIS COMPLETE: %s\nINDICATORS: %s",
+            cleanString(inst.Name),
+            getClassName(inst),
+            entry.Origin,
+            entry.CanonicalId,
+            entry.FullPath,
+            entry.Method or "PENDING",
+            (entry.Method == "FAILED" or entry.Hash == "UNAVAILABLE") and "UNAVAILABLE" or string.format("%d BYTES", #code),
+            entry.Hash or (entry.Method == "FAILED" and "UNAVAILABLE" or computeHash(code)),
+            threat and threat.Confidence or "NONE",
+            threat and tostring(threat.AnalysisComplete) or "false",
+            indicatorStr
+        )
+    elseif AppState.InspectorTab == "CODE" then
+        if entry.Method == "FAILED" then
+            codeText.Text = "Source code extraction failed (bytecode stripped or protected)."
+            codePanel.CanvasSize = UDim2.new(0, 0, 0, 100)
+        elseif code == "" and (not entry.Method or entry.Method == "PENDING") then
+            codeText.Text = "Script source not yet resolved. Click RESCAN or run DUMP / CHECKER."
+            codePanel.CanvasSize = UDim2.new(0, 0, 0, 100)
+        else
+            local formattedLines = {}
+            local lineCounter = 1
+            for line in code:gmatch("([^\r\n]*)[\r\n]?") do
+                if lineCounter <= 2500 then
+                    table.insert(formattedLines, string.format("%03d | %s", lineCounter, line))
+                elseif lineCounter == 2501 then
+                    table.insert(formattedLines, "... [PREVIEW TRUNCATED FOR UI PERFORMANCE - FULL SCRIPT PRESERVED FOR EXPORT/DUMP] ...")
+                    break
+                end
+                lineCounter = lineCounter + 1
+            end
+            local renderedStr = table.concat(formattedLines, "\n")
+            codeText.Text = renderedStr
+            local bounds = TextService:GetTextSize(renderedStr, 9, Enum.Font.Code, Vector2.new(codePanel.AbsoluteSize.X - 20, 100000))
+            codePanel.CanvasSize = UDim2.new(0, 0, 0, math.max(bounds.Y + 20, 200))
+        end
+    elseif AppState.InspectorTab == "DETECTIONS" then
+        for _, c in ipairs(detectionsPanel:GetChildren()) do
+            if c:IsA("Frame") or c:IsA("TextLabel") then c:Destroy() end
+        end
+        if not threat then
+            local unMsg = Instance.new("TextLabel")
+            unMsg.Size = UDim2.new(1, -16, 0, 40)
+            unMsg.Position = UDim2.new(0, 8, 0, 8)
+            unMsg.BackgroundTransparency = 1
+            unMsg.Text = "THIS SCRIPT HAS NOT BEEN CHECKED YET.\nRun BackDoor Checker to view detections."
+            unMsg.TextColor3 = COLORS.ThreatUnscanned
+            unMsg.TextSize = 9
+            unMsg.Font = Enum.Font.GothamBold
+            unMsg.TextXAlignment = Enum.TextXAlignment.Left
+            unMsg.Parent = detectionsPanel
+            detectionsPanel.CanvasSize = UDim2.new(0, 0, 0, 60)
+        elseif threat.Level == "ANALYSIS_FAILED" then
+            local failMsg = Instance.new("TextLabel")
+            failMsg.Size = UDim2.new(1, -16, 0, 40)
+            failMsg.Position = UDim2.new(0, 8, 0, 8)
+            failMsg.BackgroundTransparency = 1
+            failMsg.Text = "ANALYSIS INCOMPLETE:\nSource extraction returned empty/unusable bytecode."
+            failMsg.TextColor3 = COLORS.ThreatFailed
+            failMsg.TextSize = 9
+            failMsg.Font = Enum.Font.GothamBold
+            failMsg.TextXAlignment = Enum.TextXAlignment.Left
+            failMsg.Parent = detectionsPanel
+            detectionsPanel.CanvasSize = UDim2.new(0, 0, 0, 60)
+        elseif #threat.Reasons == 0 then
+            local cleanMsg = Instance.new("TextLabel")
+            cleanMsg.Size = UDim2.new(1, -16, 0, 40)
+            cleanMsg.Position = UDim2.new(0, 8, 0, 8)
+            cleanMsg.BackgroundTransparency = 1
+            cleanMsg.Text = "NO SUSPICIOUS INDICATORS DETECTED\n(Confidence: Heuristic Baseline)"
+            cleanMsg.TextColor3 = COLORS.Success
+            cleanMsg.TextSize = 9
+            cleanMsg.Font = Enum.Font.GothamBold
+            cleanMsg.TextXAlignment = Enum.TextXAlignment.Left
+            cleanMsg.Parent = detectionsPanel
+            detectionsPanel.CanvasSize = UDim2.new(0, 0, 0, 60)
+        else
+            local dHeight = 0
+            for rIdx, reason in ipairs(threat.Reasons) do
+                local rCard = Instance.new("Frame")
+                rCard.Size = UDim2.new(1, -12, 0, 42)
+                rCard.Position = UDim2.new(0, 6, 0, dHeight)
+                rCard.BackgroundColor3 = COLORS.PanelAlt
+                rCard.BorderSizePixel = 0
+                rCard.Parent = detectionsPanel
+
+                local rCorner = Instance.new("UICorner")
+                rCorner.CornerRadius = UDim.new(0, 4)
+                rCorner.Parent = rCard
+
+                local rTitle = Instance.new("TextLabel")
+                rTitle.Size = UDim2.new(1, -80, 0, 18)
+                rTitle.Position = UDim2.new(0, 8, 0, 2)
+                rTitle.BackgroundTransparency = 1
+                rTitle.Text = string.format("+%d %s", reason.Score, reason.Desc)
+                rTitle.TextColor3 = (reason.Score >= 80) and COLORS.ThreatHigh or ((reason.Score >= 40) and COLORS.ThreatMedium or COLORS.ThreatLow)
+                rTitle.TextSize = 8
+                rTitle.Font = Enum.Font.GothamBold
+                rTitle.TextTruncate = Enum.TextTruncate.AtEnd
+                rTitle.TextXAlignment = Enum.TextXAlignment.Left
+                rTitle.Parent = rCard
+
+                local rSub = Instance.new("TextLabel")
+                rSub.Size = UDim2.new(1, -80, 0, 16)
+                rSub.Position = UDim2.new(0, 8, 0, 20)
+                rSub.BackgroundTransparency = 1
+                rSub.Text = reason.Line and string.format("Detected at Line %d", reason.Line) or "Structural/Name Signature"
+                rSub.TextColor3 = COLORS.TextDim
+                rSub.TextSize = 8
+                rSub.Font = Enum.Font.Gotham
+                rSub.TextXAlignment = Enum.TextXAlignment.Left
+                rSub.Parent = rCard
+
+                if reason.Line then
+                    local jumpBtn = Instance.new("TextButton")
+                    jumpBtn.Size = UDim2.new(0, 60, 0, 24)
+                    jumpBtn.Position = UDim2.new(1, -66, 0, 9)
+                    jumpBtn.BackgroundColor3 = COLORS.PanelHover
+                    jumpBtn.BorderSizePixel = 0
+                    jumpBtn.Text = "JUMP"
+                    jumpBtn.TextColor3 = COLORS.BlueLight
+                    jumpBtn.TextSize = 8
+                    jumpBtn.Font = Enum.Font.GothamBold
+                    jumpBtn.Parent = rCard
+
+                    local jCorner = Instance.new("UICorner")
+                    jCorner.CornerRadius = UDim.new(0, 3)
+                    jCorner.Parent = jumpBtn
+
+                    local targetLineNum = reason.Line
+                    jumpBtn.MouseButton1Click:Connect(function()
+                        jumpToLine(targetLineNum)
+                    end)
+                end
+
+                dHeight = dHeight + 46
+            end
+            detectionsPanel.CanvasSize = UDim2.new(0, 0, 0, dHeight + 10)
+        end
+    end
+end
+
+searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+    AppState.SearchQuery = searchBox.Text
+    listFrame.CanvasPosition = Vector2.new(0, 0)
+    filterDataset()
+end)
+
+copyCodeBtn.MouseButton1Click:Connect(function()
+    if not AppState.Selected then return end
+    if not AppState.Selected.ResolvedCode or AppState.Selected.Method == "PENDING" then
+        local code, method = resolveSource(AppState.Selected.Instance)
+        AppState.Selected.ResolvedCode = code
+        AppState.Selected.Method = method
+        if method == "FAILED" then
+            AppState.Selected.Hash = "UNAVAILABLE"
+        else
+            AppState.Selected.Hash = computeHash(code)
+        end
+    end
+    if AppState.Selected.Method == "FAILED" then
+        copyCodeBtn.Text = "SOURCE UNAVAILABLE"
+        task.delay(1.5, function() copyCodeBtn.Text = "COPY CODE" end)
+        return
+    end
+    local code = AppState.Selected.ResolvedCode or ""
+    if setClipboardFunc then
+        local ok = pcall(setClipboardFunc, code)
+        if ok then
+            copyCodeBtn.Text = "COPIED ✓"
+        else
+            copyCodeBtn.Text = "COPY FAILED"
+        end
+        task.delay(1.5, function()
+            copyCodeBtn.Text = "COPY CODE"
+        end)
+    else
+        copyCodeBtn.Text = "UNAVAILABLE"
+        task.delay(1.5, function()
+            copyCodeBtn.Text = "COPY CODE"
+        end)
+    end
+end)
+
+copyPathBtn.MouseButton1Click:Connect(function()
+    if not AppState.Selected then return end
+    local path = AppState.Selected.FullPath
+    if setClipboardFunc then
+        local ok = pcall(setClipboardFunc, path)
+        if ok then
+            copyPathBtn.Text = "COPIED PATH ✓"
+        else
+            copyPathBtn.Text = "COPY FAILED"
+        end
+        task.delay(1.5, function()
+            copyPathBtn.Text = "COPY PATH"
+        end)
+    end
+end)
+
+exportBtn.MouseButton1Click:Connect(function()
+    if not AppState.Selected then return end
+    if not safeMakeDir(exportDirectory) then
+        exportBtn.Text = "EXPORT FAILED"
+        task.delay(1.5, function() exportBtn.Text = "EXPORT" end)
+        return
+    end
+
+    local inst = AppState.Selected.Instance
+    if not AppState.Selected.ResolvedCode or AppState.Selected.Method == "PENDING" then
+        local code, method = resolveSource(inst)
+        AppState.Selected.ResolvedCode = code
+        AppState.Selected.Method = method
+        if method == "FAILED" then
+            AppState.Selected.Hash = "UNAVAILABLE"
+        else
+            AppState.Selected.Hash = computeHash(code)
+        end
+    end
+
+    if AppState.Selected.Method == "FAILED" then
+        exportBtn.Text = "SOURCE UNAVAILABLE"
+        task.delay(1.5, function() exportBtn.Text = "EXPORT" end)
+        return
+    end
+
+    local baseName = cleanString(inst.Name)
+    local filePath = string.format("%s/%s.luau", exportDirectory, baseName)
+    local counter = 1
+    while fileExists(filePath) do
+        filePath = string.format("%s/%s_%d.luau", exportDirectory, baseName, counter)
+        counter = counter + 1
+    end
+
+    local code = AppState.Selected.ResolvedCode or ""
+    local fileHeader = makeFileHeader(AppState.Selected, code)
+    local fullExportContent = fileHeader .. "\n" .. code .. "\nDATA_END\n"
+    local okCode = writeText(filePath, fullExportContent)
+
+    local reportData = {
+        Name = inst.Name,
+        Class = getClassName(inst),
+        Origin = AppState.Selected.Origin,
+        CanonicalId = AppState.Selected.CanonicalId,
+        Path = AppState.Selected.FullPath,
+        Method = AppState.Selected.Method,
+        SourceLength = #code,
+        Hash = AppState.Selected.Hash or computeHash(code),
+        ThreatScore = AppState.Selected.Threat and AppState.Selected.Threat.Score or 0,
+        ThreatLevel = AppState.Selected.Threat and AppState.Selected.Threat.Level or "UNSCANNED",
+        ThreatConfidence = AppState.Selected.Threat and AppState.Selected.Threat.Confidence or "NONE",
+        AnalysisComplete = AppState.Selected.Threat and AppState.Selected.Threat.AnalysisComplete or false,
+        ThreatReasons = AppState.Selected.Threat and AppState.Selected.Threat.Reasons or {},
+        ScanMode = AppState.ScanMode,
+        Timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    }
+
+    local reportPath = string.format("%s/%s_REPORT.json", exportDirectory, baseName)
+    local okJsonEnc, encoded = pcall(HttpService.JSONEncode, HttpService, reportData)
+    local okReport = false
+    if okJsonEnc then
+        okReport = writeText(reportPath, encoded)
+    end
+
+    if okCode and okReport then
+        exportBtn.Text = "EXPORTED ✓"
+    else
+        exportBtn.Text = "EXPORT FAILED"
+    end
+    task.delay(1.5, function()
+        exportBtn.Text = "EXPORT"
+    end)
+end)
+
+rescanBtn.MouseButton1Click:Connect(function()
+    if not AppState.Selected then return end
+    local inst = AppState.Selected.Instance
+    local code, method = resolveSource(inst)
+    AppState.Selected.ResolvedCode = code
+    AppState.Selected.Method = method
+    if method == "FAILED" then
+        AppState.Selected.Hash = "UNAVAILABLE"
+    else
+        AppState.Selected.Hash = computeHash(code)
+    end
+    AppState.Selected.Threat = analyzeBackdoorThreat(inst, code, method)
+    AppState.RegistryCache[inst] = AppState.Selected
+    updatePreview(AppState.Selected)
+    updateVisibleRows()
+    rescanBtn.Text = "RESCANNED ✓"
+    task.delay(1.2, function()
+        rescanBtn.Text = "RESCAN"
+    end)
+end)
+
+local function cleanUnreferencedCache(validInstancesSet)
+    for inst, _ in pairs(AppState.RegistryCache) do
+        if not validInstancesSet[inst] then
+            AppState.RegistryCache[inst] = nil
+        end
+    end
+end
+
+collectScriptTargets = function(mode)
+    local targetList = {}
+    local seen = {}
+    local validInstancesSet = {}
+
+    local function pushTarget(inst, origin)
+        if not inst then return end
+        local okClass, className = pcall(function()
+            return inst.ClassName
+        end)
+        if not okClass then return end
+        if className ~= "LocalScript" and className ~= "ModuleScript" then return end
+        if seen[inst] or isSystemInternal(inst) or isOtherPlayerDescendant(inst) then return end
+
+        local hierarchy = getHierarchy(inst)
+        local fullPath = buildDeterministicPath(origin, hierarchy, inst.Name)
+        local canonicalId = getSafeCanonicalId(inst, origin)
+        local searchBlob = string.lower(string.format("%s %s %s %s %s", inst.Name, cleanString(origin), fullPath, canonicalId, className)):gsub("%s+", "")
+
+        local cachedEntry = AppState.RegistryCache[inst]
+        local entry
+        if cachedEntry and cachedEntry.FullPath == fullPath and cachedEntry.CanonicalId == canonicalId then
+            entry = cachedEntry
+            entry.SearchBlob = searchBlob
+        else
+            entry = {
+                Instance = inst,
+                Origin = cleanString(origin),
+                Hierarchy = hierarchy,
+                FullPath = fullPath,
+                CanonicalId = canonicalId,
+                SearchBlob = searchBlob,
+                Method = "PENDING",
+                ResolvedCode = nil,
+                Hash = nil,
+                Threat = nil
+            }
+            AppState.RegistryCache[inst] = entry
+        end
+
+        seen[inst] = true
+        validInstancesSet[inst] = true
+        table.insert(targetList, entry)
+    end
+
+    if mode == "FULL" then
+        for _, inst in ipairs(game:GetDescendants()) do
+            pushTarget(inst, "DataModel")
+        end
+    else
+        local validServices = {
+            game:GetService("ReplicatedStorage"),
+            game:GetService("StarterPlayer"),
+            game:GetService("StarterGui"),
+            game:GetService("StarterPack"),
+            game:GetService("ReplicatedFirst"),
+            game:GetService("Workspace")
+        }
+
+        local pScripts = localPlayer:FindFirstChild("PlayerScripts")
+        local pGui = localPlayer:FindFirstChild("PlayerGui")
+        local pPack = localPlayer:FindFirstChild("Backpack")
+
+        if pScripts then table.insert(validServices, pScripts) end
+        if pGui then table.insert(validServices, pGui) end
+        if pPack then table.insert(validServices, pPack) end
+
+        for _, service in ipairs(validServices) do
+            local descendants = {}
+            pcall(function()
+                descendants = service:GetDescendants()
+            end)
+            for _, inst in ipairs(descendants) do
+                pushTarget(inst, service.Name)
+            end
+        end
+
+        local loadedModules = {}
+        pcall(function()
+            loadedModules = getModules()
+        end)
+        for _, inst in ipairs(loadedModules) do
+            if typeof(inst) == "Instance" then
+                pushTarget(inst, "LoadedModules")
+            end
+        end
+
+        local nilInstances = {}
+        pcall(function()
+            nilInstances = getNil()
+        end)
+        for _, inst in ipairs(nilInstances) do
+            if typeof(inst) == "Instance" then
+                pushTarget(inst, "NilInstances")
+                local d = {}
+                pcall(function()
+                    d = inst:GetDescendants()
+                end)
+                for _, child in ipairs(d) do
+                    pushTarget(child, "NilInstances")
+                end
+            end
+        end
+    end
+
+    cleanUnreferencedCache(validInstancesSet)
+
+    table.sort(targetList, function(a, b)
+        return a.FullPath:lower() < b.FullPath:lower()
+    end)
+
+    return targetList
+end
+
+collectRemoteTargets = function(mode)
+    local remoteList = {}
+    local seen = {}
+
+    local function pushRemote(inst)
+        if not inst or seen[inst] then return end
+        if isSystemInternal(inst) or isOtherPlayerDescendant(inst) then return end
+        if inst:IsA("RemoteEvent") or inst:IsA("RemoteFunction") or inst:IsA("UnreliableRemoteEvent") then
+            seen[inst] = true
+            table.insert(remoteList, inst)
+        end
+    end
+
+    if mode == "FULL" then
+        for _, inst in ipairs(game:GetDescendants()) do
+            pushRemote(inst)
+        end
+    else
+        local validServices = {
+            game:GetService("ReplicatedStorage"),
+            game:GetService("StarterPlayer"),
+            game:GetService("StarterGui"),
+            game:GetService("StarterPack"),
+            game:GetService("ReplicatedFirst"),
+            game:GetService("Workspace")
+        }
+        local pScripts = localPlayer:FindFirstChild("PlayerScripts")
+        local pGui = localPlayer:FindFirstChild("PlayerGui")
+        local pPack = localPlayer:FindFirstChild("Backpack")
+
+        if pScripts then table.insert(validServices, pScripts) end
+        if pGui then table.insert(validServices, pGui) end
+        if pPack then table.insert(validServices, pPack) end
+
+        for _, service in ipairs(validServices) do
+            local descendants = {}
+            pcall(function() descendants = service:GetDescendants() end)
+            for _, inst in ipairs(descendants) do
+                pushRemote(inst)
+            end
+        end
+
+        local nilInstances = {}
+        pcall(function() nilInstances = getNil() end)
+        for _, inst in ipairs(nilInstances) do
+            if typeof(inst) == "Instance" then
+                pushRemote(inst)
+                local d = {}
+                pcall(function() d = inst:GetDescendants() end)
+                for _, child in ipairs(d) do
+                    pushRemote(child)
+                end
+            end
+        end
+    end
+
+    return remoteList
+end
+
+collectTargets = function()
+    if AppState.ScanMode == "TARGETED" then
+        if AppState.Selected and AppState.Selected.Instance then
+            local inst = AppState.Selected.Instance
+            local code, method = resolveSource(inst)
+            AppState.Selected.ResolvedCode = code
+            AppState.Selected.Method = method
+            if method == "FAILED" then
+                AppState.Selected.Hash = "UNAVAILABLE"
+            else
+                AppState.Selected.Hash = computeHash(code)
+            end
+            AppState.Selected.Threat = analyzeBackdoorThreat(inst, code, method)
+            AppState.RegistryCache[inst] = AppState.Selected
+            updatePreview(AppState.Selected)
+            filterDataset()
+            percentLabel.Text = "TARGETED SCRIPT REFRESHED"
+            return
+        else
+            setMode("SMART")
+        end
+    end
+
+    local modeToCollect = (AppState.ScanMode == "FULL") and "FULL" or "SMART"
+    AppState.Registry = collectScriptTargets(modeToCollect)
+    AppState.Stats.TotalScripts = #AppState.Registry
+    AppState.Stats.Unscanned = #AppState.Registry
+    AppState.Stats.Clean = 0
+    AppState.Stats.Low = 0
+    AppState.Stats.Medium = 0
+    AppState.Stats.High = 0
+    AppState.Stats.Failed = 0
+    AppState.Stats.TotalRemotes = #collectRemoteTargets(modeToCollect)
+    statsOverview.Text = string.format("%d SCRIPTS   %d REMOTES\nCLEAN 0   LOW 0   MED 0   HIGH 0   FAIL 0", AppState.Stats.TotalScripts, AppState.Stats.TotalRemotes)
+    listFrame.CanvasPosition = Vector2.new(0, 0)
+    filterDataset()
+end
+
+local function executeAuditInternal(overrideMode)
+    local currentMode = overrideMode or AppState.ScanMode
+    local startTime = os.clock()
+
+    progressFill.Size = UDim2.new(0, 0, 1, 0)
+    percentLabel.Text = string.format("CHECKING BACKDOORS [%s MODE]...", currentMode)
+
+    local report = {
+        GameTitle = placeTitle,
+        PlaceId = placeId,
+        ScanTimestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+        ScanMode = (currentMode == "SMART" and "SMART_AUDIT") or ((currentMode == "FULL" and "FULL_GAME") or "TARGETED"),
+        Scope = (currentMode == "SMART" and "FILTERED_TARGET_REGISTRY") or ((currentMode == "FULL" and "ALL_ACCESSIBLE_AUDIT_DESCENDANTS") or "SELECTED_TARGET"),
+        DurationSeconds = 0,
+        TotalScriptsScanned = 0,
+        TotalRemotesScanned = 0,
+        AuditSummary = {
+            CleanThreatCount = 0,
+            LowThreatCount = 0,
+            MediumThreatCount = 0,
+            HighThreatCount = 0,
+            AnalysisFailedCount = 0,
+            UnscannedCount = 0
+        },
+        SuspiciousRemotes = {},
+        SuspiciousScripts = {}
+    }
+
+    local scriptsToAudit = {}
+    local remoteTargets = {}
+
+    if currentMode == "TARGETED" then
+        if not AppState.Selected then
+            percentLabel.Text = "NO TARGET SCRIPT SELECTED"
+            return
+        end
+        scriptsToAudit = { AppState.Selected }
+        remoteTargets = {}
+    else
+        scriptsToAudit = collectScriptTargets(currentMode)
+        remoteTargets = collectRemoteTargets(currentMode)
+        AppState.Registry = scriptsToAudit
+    end
+
+    local totalScanned = #scriptsToAudit
+    local remotesScanned = #remoteTargets
+    report.TotalScriptsScanned = totalScanned
+    report.TotalRemotesScanned = remotesScanned
+
+    for _, remote in ipairs(remoteTargets) do
+        local threat = analyzeBackdoorThreat(remote, "", "SOURCE")
+        if threat.Score >= 40 then
+            table.insert(report.SuspiciousRemotes, {
+                Name = remote.Name,
+                Class = remote.ClassName,
+                Path = remote:GetFullName(),
+                Score = threat.Score,
+                Level = threat.Level,
+                Reasons = threat.Reasons
+            })
+        end
+    end
+
+    local cleanCount, lowCount, medCount, highCount, failedCount = 0, 0, 0, 0, 0
+
+    for idx, entry in ipairs(scriptsToAudit) do
+        local code = entry.ResolvedCode
+        local method = entry.Method
+        if not code or method == "PENDING" then
+            code, method = resolveSource(entry.Instance)
+            entry.ResolvedCode = code
+            entry.Method = method
+            if method == "FAILED" then
+                entry.Hash = "UNAVAILABLE"
+            else
+                entry.Hash = computeHash(code)
+            end
+        end
+        local threat = analyzeBackdoorThreat(entry.Instance, code, method)
+        entry.Threat = threat
+        AppState.RegistryCache[entry.Instance] = entry
+
+        if threat.Level == "HIGH" then
+            highCount = highCount + 1
+        elseif threat.Level == "MEDIUM" then
+            medCount = medCount + 1
+        elseif threat.Level == "LOW" then
+            lowCount = lowCount + 1
+        elseif threat.Level == "ANALYSIS_FAILED" then
+            failedCount = failedCount + 1
+        else
+            cleanCount = cleanCount + 1
+        end
+
+        if threat.Score >= 40 then
+            table.insert(report.SuspiciousScripts, {
+                Name = entry.Instance.Name,
+                Path = entry.FullPath,
+                CanonicalId = entry.CanonicalId,
+                Origin = entry.Origin,
+                Score = threat.Score,
+                Level = threat.Level,
+                Reasons = threat.Reasons
+            })
+        end
+
+        local ratio = idx / math.max(1, totalScanned)
+        progressFill.Size = UDim2.new(ratio, 0, 1, 0)
+        percentLabel.Text = string.format("%s CHECK %d%% (%d/%d)", currentMode, math.floor(ratio * 100), idx, totalScanned)
+        if idx % 12 == 0 then
+            task.wait()
+        end
+    end
+
+    local duration = math.floor((os.clock() - startTime) * 100) / 100
+    report.DurationSeconds = duration
+    report.AuditSummary.CleanThreatCount = cleanCount
+    report.AuditSummary.LowThreatCount = lowCount
+    report.AuditSummary.MediumThreatCount = medCount
+    report.AuditSummary.HighThreatCount = highCount
+    report.AuditSummary.AnalysisFailedCount = failedCount
+    report.AuditSummary.UnscannedCount = math.max(0, totalScanned - (cleanCount + lowCount + medCount + highCount + failedCount))
+
+    if currentMode == "TARGETED" then
+        statsOverview.Text = string.format("1 SCRIPT   0 REMOTES\nTARGETED: %s | THREAT: %s (%d)", cleanString(AppState.Selected.Instance.Name), AppState.Selected.Threat.Level, AppState.Selected.Threat.Score)
+        AppState.LastTargetedResult = {
+            Selected = AppState.Selected,
+            Report = report,
+            Duration = duration
+        }
+    else
+        AppState.Stats.TotalScripts = totalScanned
+        AppState.Stats.TotalRemotes = remotesScanned
+        AppState.Stats.Unscanned = report.AuditSummary.UnscannedCount
+        AppState.Stats.Clean = cleanCount
+        AppState.Stats.Low = lowCount
+        AppState.Stats.Medium = medCount
+        AppState.Stats.High = highCount
+        AppState.Stats.Failed = failedCount
+        statsOverview.Text = string.format("%d SCRIPTS   %d REMOTES\nCLEAN %d   LOW %d   MED %d   HIGH %d   FAIL %d", totalScanned, remotesScanned, cleanCount, lowCount, medCount, highCount, failedCount)
+        
+        AppState.LastSnapshot = {
+            Identity = {
+                PlaceId = placeId,
+                GameId = gameId,
+                JobId = jobId,
+                PlaceVersion = placeVersion
+            },
+            Mode = currentMode,
+            Scope = report.Scope,
+            Scripts = {},
+            Remotes = {}
+        }
+        for _, item in ipairs(scriptsToAudit) do
+            AppState.LastSnapshot.Scripts[item.CanonicalId] = {
+                Name = item.Instance.Name,
+                FullPath = item.FullPath,
+                Length = (item.Method == "FAILED" or item.Hash == "UNAVAILABLE") and 0 or (item.ResolvedCode and #item.ResolvedCode or 0),
+                Hash = item.Hash or (item.Method == "FAILED" and "UNAVAILABLE" or computeHash(item.ResolvedCode or "")),
+                ThreatLevel = item.Threat and item.Threat.Level or "UNSCANNED",
+                ThreatScore = item.Threat and item.Threat.Score or 0,
+                Confidence = item.Threat and item.Threat.Confidence or "NONE",
+                Method = item.Method or "PENDING",
+                ReasonsCount = item.Threat and #item.Threat.Reasons or 0,
+                ReasonFingerprint = buildReasonFingerprint(item.Threat)
+            }
+        end
+        for _, rem in ipairs(remoteTargets) do
+            local fName = rem.Name
+            pcall(function() fName = rem:GetFullName() end)
+            AppState.LastSnapshot.Remotes[fName] = {
+                Class = rem.ClassName
+            }
+        end
+    end
+
+    safeMakeDir(rootDirectory)
+    local okJson, encoded = pcall(HttpService.JSONEncode, HttpService, report)
+    if okJson then
+        writeText(backdoorFilePath, encoded)
+    end
+
+    local humanReportText = formatAuditSummaryReport(report)
+    writeText(humanReportFilePath, humanReportText)
+
+    table.insert(AppState.History, {
+        Timestamp = os.date("%H:%M:%S"),
+        Mode = currentMode,
+        Scope = report.Scope,
+        Duration = duration,
+        Scripts = totalScanned,
+        Remotes = remotesScanned,
+        Suspicious = #report.SuspiciousScripts + #report.SuspiciousRemotes,
+        Clean = cleanCount,
+        Low = lowCount,
+        Medium = medCount,
+        High = highCount,
+        Failed = failedCount,
+        Unscanned = report.AuditSummary.UnscannedCount
+    })
+
+    percentLabel.Text = string.format("CHECK COMPLETE (%.2fs) | SAVED: %s", duration, backdoorFilePath)
+    if AppState.Selected then
+        updatePreview(AppState.Selected)
+    end
+    filterDataset()
+end
+
+local function executeAudit(overrideMode)
+    if AppState.IsRunning then return end
+    setBusyState(true)
+
+    local ok, err = xpcall(function()
+        executeAuditInternal(overrideMode)
+    end, function(e)
+        return debug.traceback(e)
+    end)
+
+    setBusyState(false)
+    if not ok then
+        percentLabel.Text = "CHECK FAILED (ERROR LOGGED)"
+    end
+end
+
+local function executeDumpInternal(mode)
+    safeMakeDir(rootDirectory)
+    local targetsToDump = {}
+    if AppState.ScanMode == "TARGETED" then
+        if AppState.Selected then
+            targetsToDump = { AppState.Selected }
+        else
+            percentLabel.Text = "TARGETED DUMP: NO SCRIPT SELECTED"
+            return
+        end
+    else
+        targetsToDump = AppState.Registry
+    end
+
+    local total = #targetsToDump
+    if total == 0 then
+        percentLabel.Text = "NO TARGET SCRIPTS DETECTED"
+        return
+    end
+
+    local manifestData = {
+        GameTitle = placeTitle,
+        PlaceId = placeId,
+        PlaceVersion = placeVersion,
+        DumpTime = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+        TotalCount = total,
+        Manifest = {}
+    }
+
+    if mode == "SINGLE" or mode == "BOTH" then
+        local masterHeader = string.format([=[
+--------------------------------------------------------------------------------
+Generated by Colors - Blue
+--------------------------------------------------------------------------------
+GAME_TITLE     = %s
+PLACE_ID       = %d
+GAME_ID        = %d
+JOB_ID         = %s
+PLACE_VERSION  = %d
+TOTAL_SCRIPTS  = %d
+DUMP_TIME      = %s
+]=], quoteString(placeTitle), placeId, gameId, quoteString(jobId), placeVersion, total, quoteString(os.date("!%Y-%m-%dT%H:%M:%SZ")))
+        writeText(masterFilePath, masterHeader)
+    end
+
+    for idx, entry in ipairs(targetsToDump) do
+        local inst = entry.Instance
+        local code = entry.ResolvedCode
+        local method = entry.Method
+
+        if not code or method == "PENDING" then
+            code, method = resolveSource(inst)
+            entry.ResolvedCode = code
+            entry.Method = method
+            if method == "FAILED" then
+                entry.Hash = "UNAVAILABLE"
+            else
+                entry.Hash = computeHash(code)
+            end
+            entry.Threat = analyzeBackdoorThreat(inst, code, method)
+            AppState.RegistryCache[inst] = entry
+        elseif not entry.Threat then
+            entry.Threat = analyzeBackdoorThreat(inst, code, method)
+            AppState.RegistryCache[inst] = entry
+        end
+
+        local manifestEntry = {
+            Index = idx,
+            Name = inst.Name,
+            Class = getClassName(inst),
+            Path = entry.FullPath,
+            CanonicalId = entry.CanonicalId,
+            Origin = entry.Origin,
+            Method = method,
+            SourceLength = (method == "FAILED" or entry.Hash == "UNAVAILABLE") and 0 or #code,
+            Hash = entry.Hash or (method == "FAILED" and "UNAVAILABLE" or computeHash(code)),
+            ThreatScore = entry.Threat and entry.Threat.Score or 0,
+            ThreatLevel = entry.Threat and entry.Threat.Level or "UNSCANNED",
+            ThreatConfidence = entry.Threat and entry.Threat.Confidence or "NONE",
+            AnalysisComplete = entry.Threat and entry.Threat.AnalysisComplete or false
+        }
+        table.insert(manifestData.Manifest, manifestEntry)
+
+        if mode == "SPLIT" or mode == "BOTH" then
+            local folderPath = rootDirectory .. "/" .. entry.Origin
+            if #entry.Hierarchy > 0 then
+                folderPath = folderPath .. "/" .. table.concat(entry.Hierarchy, "/")
+            end
+            safeMakeDir(folderPath)
+
+            local filePath = folderPath .. "/" .. cleanString(inst.Name) .. ".luau"
+            local counter = 1
+            while fileExists(filePath) do
+                filePath = folderPath .. "/" .. cleanString(inst.Name) .. "_" .. counter .. ".luau"
+                counter = counter + 1
+            end
+
+            local fileHeader = makeFileHeader(entry, code)
+            local fullOutput = fileHeader .. "\n" .. code .. "\nDATA_END\n"
+            writeText(filePath, fullOutput)
+        end
+
+        if mode == "SINGLE" or mode == "BOTH" then
+            local wrappedSource = wrapSource(code)
+            local chunk = string.format([=[
+
+--------------------------------------------------------------------------------
+RECORD        = %d
+NAME          = %s
+CLASS         = %s
+PATH          = %s
+CANONICAL_ID  = %s
+ORIGIN        = %s
+METHOD        = %s
+THREAT_LEVEL  = %s
+SOURCE_LENGTH = %d
+HASH          = %s
+DATA_BEGIN
+%s
+DATA_END
+]=], idx, quoteString(inst.Name), quoteString(getClassName(inst)), quoteString(entry.FullPath), quoteString(entry.CanonicalId), quoteString(entry.Origin), quoteString(method), quoteString(manifestEntry.ThreatLevel), manifestEntry.SourceLength, quoteString(manifestEntry.Hash), wrappedSource)
+            appendText(masterFilePath, chunk)
+        end
+
+        local ratio = idx / total
+        progressFill.Size = UDim2.new(ratio, 0, 1, 0)
+        percentLabel.Text = string.format("%d%% (%d/%d) %s", math.floor(ratio * 100), idx, total, entry.FullPath:sub(1, 40))
+
+        if idx % 12 == 0 then
+            task.wait()
+        end
+    end
+
+    local okJson, encodedManifest = pcall(HttpService.JSONEncode, HttpService, manifestData)
+    if okJson then
+        writeText(manifestFilePath, encodedManifest)
+    end
+
+    percentLabel.Text = string.format("DUMP COMPLETE | SAVED TO: %s", rootDirectory)
+end
+
+local function executeDump(mode)
+    if AppState.IsRunning then return end
+    setBusyState(true)
+
+    local ok, err = xpcall(function()
+        executeDumpInternal(mode)
+    end, function(e)
+        return debug.traceback(e)
+    end)
+
+    setBusyState(false)
+    if not ok then
+        percentLabel.Text = "DUMP FAILED (ERROR LOGGED)"
+    end
+end
+
+local function showFullGameConfirmation()
+    if modalActionConnection then
+        modalActionConnection:Disconnect()
+        modalActionConnection = nil
+    end
+
+    modalTitle.Text = "FULL GAME DUMP CONFIRMATION"
+    modalBodyText.Text = "WARNING: FULL GAME mode scans and dumps all accessible game scripts across the entire DataModel (excluding internal Roblox Core packages and player character models).\n\nScope: ALL_ACCESSIBLE_AUDIT_DESCENDANTS\nOn larger game worlds, this operation takes significantly longer.\n\nProceed with full scan?"
+    modalActionBtn.Text = "START FULL SCAN"
+    modalActionBtn.Visible = true
+
+    local bounds = TextService:GetTextSize(modalBodyText.Text, 9, Enum.Font.Gotham, Vector2.new(modalBody.AbsoluteSize.X - 20, 10000))
+    modalBody.CanvasSize = UDim2.new(0, 0, 0, math.max(bounds.Y + 20, 120))
+    modalBodyText.Size = UDim2.new(1, -12, 0, bounds.Y + 10)
+
+    modalActionConnection = modalActionBtn.MouseButton1Click:Connect(function()
+        hideModal()
+        task.spawn(executeAudit, "FULL")
+    end)
+
+    modalOverlay.Visible = true
+end
+
+local function showHistoryModal()
+    if modalActionConnection then
+        modalActionConnection:Disconnect()
+        modalActionConnection = nil
+    end
+
+    modalTitle.Text = "CHECK HISTORY"
+    modalActionBtn.Visible = false
+    if #AppState.History == 0 then
+        modalBodyText.Text = "No check sessions recorded in the current session."
+    else
+        local histLines = {}
+        for _, h in ipairs(AppState.History) do
+            table.insert(histLines, string.format("[%s] %s MODE (%.2fs)\nScope: %s\nScripts: %d | Remotes: %d | Suspicious: %d\nClean: %d | Low: %d | Med: %d | High: %d | Failed: %d | Unscanned: %d\n----------------------------------------", h.Timestamp, h.Mode, h.Duration or 0, h.Scope or "UNKNOWN", h.Scripts, h.Remotes, h.Suspicious, h.Clean, h.Low, h.Medium, h.High, h.Failed or 0, h.Unscanned or 0))
+        end
+        modalBodyText.Text = table.concat(histLines, "\n")
+    end
+
+    local bounds = TextService:GetTextSize(modalBodyText.Text, 9, Enum.Font.Gotham, Vector2.new(modalBody.AbsoluteSize.X - 20, 100000))
+    modalBody.CanvasSize = UDim2.new(0, 0, 0, math.max(bounds.Y + 20, 150))
+    modalBodyText.Size = UDim2.new(1, -12, 0, bounds.Y + 10)
+    modalOverlay.Visible = true
+end
+
+local function runDeepDiffScanInternal()
+    if modalActionConnection then
+        modalActionConnection:Disconnect()
+        modalActionConnection = nil
+    end
+
+    modalTitle.Text = "DEEP SNAPSHOT DIFF"
+    modalActionBtn.Visible = false
+
+    if not AppState.LastSnapshot then
+        modalBodyText.Text = "No previous snapshot recorded. Run at least one check to create a baseline for diff comparison."
+        modalOverlay.Visible = true
+        return
+    end
+
+    if AppState.LastSnapshot.Identity.PlaceId ~= placeId or AppState.LastSnapshot.Identity.GameId ~= gameId then
+        modalBodyText.Text = "DIFF UNAVAILABLE:\n\nBaseline snapshot belongs to a different Game / Place context.\nPlease run a check in the current session to establish a valid baseline."
+        modalOverlay.Visible = true
+        return
+    end
+
+    if AppState.LastSnapshot.Mode == "TARGETED" then
+        modalBodyText.Text = "DIFF UNAVAILABLE:\n\nBaseline snapshot was recorded in TARGETED mode (1 script scope).\nPlease run a SMART or FULL check to establish a full-scope baseline for comparison."
+        modalOverlay.Visible = true
+        return
+    end
+
+    progressFill.Size = UDim2.new(0, 0, 1, 0)
+    percentLabel.Text = "CALCULATING DEEP SNAPSHOT DIFF..."
+
+    local tempCurrentScripts = {}
+    local rawScriptTargets = collectScriptTargets(AppState.LastSnapshot.Mode)
+    local totalScripts = #rawScriptTargets
+
+    for idx, item in ipairs(rawScriptTargets) do
+        local freshCode, freshMethod = resolveSource(item.Instance)
+        local freshHash = (freshMethod == "FAILED") and "UNAVAILABLE" or computeHash(freshCode)
+        local freshThreat = analyzeBackdoorThreat(item.Instance, freshCode, freshMethod)
+
+        tempCurrentScripts[item.CanonicalId] = {
+            Name = item.Instance.Name,
+            FullPath = item.FullPath,
+            Length = (freshMethod == "FAILED") and 0 or #freshCode,
+            Hash = freshHash,
+            Method = freshMethod,
+            ThreatLevel = freshThreat.Level,
+            ThreatScore = freshThreat.Score,
+            Confidence = freshThreat.Confidence,
+            ReasonsCount = #freshThreat.Reasons,
+            ReasonFingerprint = buildReasonFingerprint(freshThreat)
+        }
+
+        local ratio = idx / math.max(1, totalScripts)
+        progressFill.Size = UDim2.new(ratio, 0, 1, 0)
+        percentLabel.Text = string.format("DIFF SCANNING %d%% (%d/%d)", math.floor(ratio * 100), idx, totalScripts)
+        if idx % 12 == 0 then
+            task.wait()
+        end
+    end
+
+    local tempCurrentRemotes = {}
+    for _, rem in ipairs(collectRemoteTargets(AppState.LastSnapshot.Mode)) do
+        local fName = rem.Name
+        pcall(function() fName = rem:GetFullName() end)
+        tempCurrentRemotes[fName] = {
+            Class = rem.ClassName
+        }
+    end
+
+    local addedScripts, removedScripts, modifiedScripts, sourceStateChanges = 0, 0, 0, 0
+    local methodShifts = 0
+    local profileChanges = {}
+    local criticalEscalations = {}
+    local warningEscalations = {}
+    local noticeEscalations = {}
+    local deEscalations = {}
+
+    local severityRank = {
+        ["CLEAN"] = 1,
+        ["LOW"] = 2,
+        ["MEDIUM"] = 3,
+        ["HIGH"] = 4
+    }
+
+    for id, data in pairs(tempCurrentScripts) do
+        local baseData = AppState.LastSnapshot.Scripts[id]
+        if not baseData then
+            addedScripts = addedScripts + 1
+        else
+            local oldUnavailable = (baseData.Hash == "UNAVAILABLE" or baseData.ThreatLevel == "ANALYSIS_FAILED")
+            local newUnavailable = (data.Hash == "UNAVAILABLE" or data.ThreatLevel == "ANALYSIS_FAILED")
+
+            if oldUnavailable ~= newUnavailable then
+                sourceStateChanges = sourceStateChanges + 1
+            elseif not oldUnavailable and not newUnavailable and baseData.Hash ~= data.Hash and data.Hash ~= "00000000" then
+                modifiedScripts = modifiedScripts + 1
+            end
+
+            if baseData.Method ~= data.Method then
+                methodShifts = methodShifts + 1
+            end
+
+            if baseData.ReasonFingerprint ~= data.ReasonFingerprint then
+                table.insert(profileChanges, string.format("  • %s | Rules: %d → %d | Score: %d → %d", data.Name, baseData.ReasonsCount or 0, data.ReasonsCount or 0, baseData.ThreatScore or 0, data.ThreatScore or 0))
+            end
+
+            if not oldUnavailable and not newUnavailable then
+                local oldRank = severityRank[baseData.ThreatLevel] or 0
+                local newRank = severityRank[data.ThreatLevel] or 0
+                local scoreDelta = data.ThreatScore - (baseData.ThreatScore or 0)
+
+                if newRank > oldRank then
+                    if data.ThreatLevel == "HIGH" then
+                        table.insert(criticalEscalations, string.format("▲ CRITICAL: %s (%s → %s | Score: %d → %d)", data.Name, baseData.ThreatLevel, data.ThreatLevel, baseData.ThreatScore or 0, data.ThreatScore or 0))
+                    elseif data.ThreatLevel == "MEDIUM" then
+                        table.insert(warningEscalations, string.format("▲ WARNING: %s (%s → %s | Score: %d → %d)", data.Name, baseData.ThreatLevel, data.ThreatLevel, baseData.ThreatScore or 0, data.ThreatScore or 0))
+                    else
+                        table.insert(noticeEscalations, string.format("▲ NOTICE: %s (%s → %s | Score: %d → %d)", data.Name, baseData.ThreatLevel, data.ThreatLevel, baseData.ThreatScore or 0, data.ThreatScore or 0))
+                    end
+                elseif newRank < oldRank then
+                    table.insert(deEscalations, string.format("▼ DE-ESCALATED: %s (%s → %s | Score: %d → %d)", data.Name, baseData.ThreatLevel, data.ThreatLevel, baseData.ThreatScore or 0, data.ThreatScore or 0))
+                elseif scoreDelta >= 30 then
+                    table.insert(noticeEscalations, string.format("▲ NOTICE: %s score increased %d → %d", data.Name, baseData.ThreatScore or 0, data.ThreatScore or 0))
+                end
+            end
+        end
+    end
+    for id, _ in pairs(AppState.LastSnapshot.Scripts) do
+        if not tempCurrentScripts[id] then
+            removedScripts = removedScripts + 1
+        end
+    end
+
+    local addedRemotes, removedRemotes, modifiedRemotes = 0, 0, 0
+    for path, data in pairs(tempCurrentRemotes) do
+        local baseRemote = AppState.LastSnapshot.Remotes[path]
+        if not baseRemote then
+            addedRemotes = addedRemotes + 1
+        elseif baseRemote.Class ~= data.Class then
+            modifiedRemotes = modifiedRemotes + 1
+        end
+    end
+    for path, _ in pairs(AppState.LastSnapshot.Remotes) do
+        if not tempCurrentRemotes[path] then
+            removedRemotes = removedRemotes + 1
+        end
+    end
+
+    local diffLines = {}
+    table.insert(diffLines, string.format("DEEP SNAPSHOT DIFF [%s BASELINE]", AppState.LastSnapshot.Mode))
+    table.insert(diffLines, "================================================================================")
+    
+    table.insert(diffLines, "THREAT CHANGES:")
+    if #criticalEscalations == 0 and #warningEscalations == 0 and #noticeEscalations == 0 and #deEscalations == 0 then
+        table.insert(diffLines, "  No threat escalation or severity level changes detected.")
+    else
+        for _, item in ipairs(criticalEscalations) do
+            table.insert(diffLines, "  " .. item)
+        end
+        for _, item in ipairs(warningEscalations) do
+            table.insert(diffLines, "  " .. item)
+        end
+        for _, item in ipairs(noticeEscalations) do
+            table.insert(diffLines, "  " .. item)
+        end
+        for _, item in ipairs(deEscalations) do
+            table.insert(diffLines, "  " .. item)
+        end
+    end
+    table.insert(diffLines, "--------------------------------------------------------------------------------")
+
+    table.insert(diffLines, "SOURCE AVAILABILITY & METHOD:")
+    table.insert(diffLines, string.format("  ~ %d Modified Script Bodies (Hash Mismatch)", modifiedScripts))
+    table.insert(diffLines, string.format("  ? %d Source Availability Changes", sourceStateChanges))
+    table.insert(diffLines, string.format("  # %d Extraction Method Alterations", methodShifts))
+    table.insert(diffLines, "--------------------------------------------------------------------------------")
+
+    table.insert(diffLines, "DETECTION RULE SHIFTS:")
+    if #profileChanges == 0 then
+        table.insert(diffLines, "  No detection profile changes detected.")
+    else
+        table.insert(diffLines, string.format("  %d detection profiles changed:", #profileChanges))
+        for _, item in ipairs(profileChanges) do
+            table.insert(diffLines, item)
+        end
+    end
+    table.insert(diffLines, "--------------------------------------------------------------------------------")
+
+    table.insert(diffLines, "STRUCTURE & INVENTORY:")
+    table.insert(diffLines, string.format("  + %d New Scripts Added", addedScripts))
+    table.insert(diffLines, string.format("  - %d Scripts Removed", removedScripts))
+    table.insert(diffLines, string.format("  + %d New Remotes Added", addedRemotes))
+    table.insert(diffLines, string.format("  - %d Remotes Removed", removedRemotes))
+    table.insert(diffLines, string.format("  ~ %d Remote Class Type Mutations", modifiedRemotes))
+    table.insert(diffLines, "================================================================================")
+    table.insert(diffLines, string.format("Baseline Scope: %s", AppState.LastSnapshot.Scope or "UNKNOWN"))
+    table.insert(diffLines, string.format("Session JobId : %s", tostring(AppState.LastSnapshot.Identity.JobId):sub(1, 14)))
+
+    modalBodyText.Text = table.concat(diffLines, "\n")
+
+    local bounds = TextService:GetTextSize(modalBodyText.Text, 9, Enum.Font.Gotham, Vector2.new(modalBody.AbsoluteSize.X - 20, 100000))
+    modalBody.CanvasSize = UDim2.new(0, 0, 0, math.max(bounds.Y + 20, 150))
+    modalBodyText.Size = UDim2.new(1, -12, 0, bounds.Y + 10)
+
+    percentLabel.Text = "DIFF COMPARISON COMPLETE"
+    modalOverlay.Visible = true
+end
+
+local function runDeepDiffScan()
+    if AppState.IsRunning then return end
+    setBusyState(true)
+
+    local ok, err = xpcall(function()
+        runDeepDiffScanInternal()
+    end, function(e)
+        return debug.traceback(e)
+    end)
+
+    setBusyState(false)
+    if not ok then
+        percentLabel.Text = "DIFF SCAN FAILED (ERROR LOGGED)"
+    end
+end
+
+createTopPill("HISTORY", 0, 68, showHistoryModal)
+createTopPill("DIFF SCAN", 74, 76, function()
+    task.spawn(runDeepDiffScan)
+end)
+
+makeActionBtn("Dump All", "Split large scripts", 0, 150, function()
+    task.spawn(executeDump, "SPLIT")
+end)
+
+makeActionBtn("Dump Single File", "Open single master", 158, 150, function()
+    task.spawn(executeDump, "SINGLE")
+end)
+
+makeActionBtn("BOTH MODES", "Use both methods", 316, 150, function()
+    task.spawn(executeDump, "BOTH")
+end)
+
+makeActionBtn("BackDoor Checker", "Scan for threats", 474, 155, function()
+    if AppState.ScanMode == "FULL" then
+        showFullGameConfirmation()
+    else
+        task.spawn(executeAudit)
+    end
+end)
+
+makeActionBtn("Refresh", "Reload all scripts", 637, 175, function()
+    collectTargets()
+end)
+
+collectTargets()
