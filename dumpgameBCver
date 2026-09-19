@@ -1,10 +1,11 @@
+local __CBX = {}
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local CoreGui = game:GetService("CoreGui")
 local TextService = game:GetService("TextService")
 local UserInputService = game:GetService("UserInputService")
-local CollectionService = game:GetService("CollectionService")
+__CBX.CollectionService = game:GetService("CollectionService")
 
 local localPlayer = Players.LocalPlayer
 local debugLib = debug
@@ -13,31 +14,32 @@ local decompileFunc = type(decompile) == "function" and decompile or nil
 local getBytecodeFunc = type(getscriptbytecode) == "function" and getscriptbytecode
     or type(get_script_bytecode) == "function" and get_script_bytecode
     or nil
-local dumpStringFunc = type(dumpstring) == "function" and dumpstring or nil
+__CBX.dumpStringFunc = type(dumpstring) == "function" and dumpstring or nil
 local getScriptClosureFunc = type(getscriptclosure) == "function" and getscriptclosure
     or type(get_script_closure) == "function" and get_script_closure
     or nil
 local getNil = type(getnilinstances) == "function" and getnilinstances or function() return {} end
 local getModules = type(getloadedmodules) == "function" and getloadedmodules or function() return {} end
-local getGCFunc = type(getgc) == "function" and getgc or nil
-local getConnectionsFunc = type(getconnections) == "function" and getconnections or nil
-local getEnvFunc = type(getfenv) == "function" and getfenv or nil
-local isLClosureFunc = type(islclosure) == "function" and islclosure or nil
-local getCallingScriptFunc = type(getcallingscript) == "function" and getcallingscript or nil
-local hookMetaMethodFunc = type(hookmetamethod) == "function" and hookmetamethod or nil
-local getNamecallMethodFunc = type(getnamecallmethod) == "function" and getnamecallmethod or nil
-local checkCallerFunc = type(checkcaller) == "function" and checkcaller or nil
-local newCClosureFunc = type(newcclosure) == "function" and newcclosure or nil
-local identifyExecutorFunc = type(identifyexecutor) == "function" and identifyexecutor or type(getexecutorname) == "function" and getexecutorname or nil
+__CBX.getGCFunc = type(getgc) == "function" and getgc or nil
+__CBX.getConnectionsFunc = type(getconnections) == "function" and getconnections or nil
+__CBX.getEnvFunc = type(getfenv) == "function" and getfenv or nil
+__CBX.isLClosureFunc = type(islclosure) == "function" and islclosure or nil
+__CBX.getCallingScriptFunc = type(getcallingscript) == "function" and getcallingscript or nil
+__CBX.hookMetaMethodFunc = type(hookmetamethod) == "function" and hookmetamethod or nil
+__CBX.getNamecallMethodFunc = type(getnamecallmethod) == "function" and getnamecallmethod or nil
+__CBX.checkCallerFunc = type(checkcaller) == "function" and checkcaller or nil
+__CBX.newCClosureFunc = type(newcclosure) == "function" and newcclosure or nil
+__CBX.getRawMetatableFunc = type(getrawmetatable) == "function" and getrawmetatable or nil
+__CBX.identifyExecutorFunc = type(identifyexecutor) == "function" and identifyexecutor or type(getexecutorname) == "function" and getexecutorname or nil
 local getInfo = debugLib and type(debugLib.getinfo) == "function" and debugLib.getinfo or type(getinfo) == "function" and getinfo or nil
 local getConsts = debugLib and type(debugLib.getconstants) == "function" and debugLib.getconstants or type(getconstants) == "function" and getconstants or nil
 local getUpvals = debugLib and type(debugLib.getupvalues) == "function" and debugLib.getupvalues or type(getupvalues) == "function" and getupvalues or nil
-local getProtosFunc = debugLib and type(debugLib.getprotos) == "function" and debugLib.getprotos or type(getprotos) == "function" and getprotos or nil
-local getProtoFunc = debugLib and type(debugLib.getproto) == "function" and debugLib.getproto or type(getproto) == "function" and getproto or nil
+__CBX.getProtosFunc = debugLib and type(debugLib.getprotos) == "function" and debugLib.getprotos or type(getprotos) == "function" and getprotos or nil
+__CBX.getProtoFunc = debugLib and type(debugLib.getproto) == "function" and debugLib.getproto or type(getproto) == "function" and getproto or nil
 
 local writeFile = type(writefile) == "function" and writefile or nil
 local appendFile = type(appendfile) == "function" and appendfile or nil
-local readFile = type(readfile) == "function" and readfile or nil
+__CBX.readFile = type(readfile) == "function" and readfile or nil
 local makeFolder = type(makefolder) == "function" and makefolder or nil
 local isFolder = type(isfolder) == "function" and isfolder or nil
 local isFile = type(isfile) == "function" and isfile or nil
@@ -72,7 +74,7 @@ local COLORS = {
     ThreatFailed = Color3.fromRGB(215, 95, 135)
 }
 
-local function multiply32(a, b)
+function __CBX.multiply32(a, b)
     local aLow = bit32.band(a, 0xFFFF)
     local aHigh = bit32.rshift(a, 16)
     local bLow = bit32.band(b, 0xFFFF)
@@ -88,7 +90,7 @@ local function computeHash(str)
     end
     local h = 2166136261
     for i = 1, #str do
-        h = multiply32(bit32.bxor(h, string.byte(str, i)), 16777619)
+        h = __CBX.multiply32(bit32.bxor(h, string.byte(str, i)), 16777619)
     end
     return string.format("%08x", h)
 end
@@ -115,7 +117,7 @@ local function quoteString(value)
     return string.format("%q", tostring(value))
 end
 
-local function safeFullName(inst)
+function __CBX.safeFullName(inst)
     local name = tostring(inst)
     pcall(function()
         name = inst:GetFullName()
@@ -123,7 +125,7 @@ local function safeFullName(inst)
     return name
 end
 
-local function getFunctionInfo(fn)
+function __CBX.getFunctionInfo(fn)
     local result = {}
     if getInfo then
         pcall(function()
@@ -153,7 +155,7 @@ local function getFunctionInfo(fn)
     return result
 end
 
-local function serializeValue(value, depth, seen, maxItems)
+function __CBX.serializeValue(value, depth, seen, maxItems)
     depth = depth or 0
     seen = seen or {}
     maxItems = maxItems or 64
@@ -172,7 +174,7 @@ local function serializeValue(value, depth, seen, maxItems)
         return tostring(value)
     end
     if robloxType == "Instance" then
-        return quoteString(string.format("Instance<%s>", safeFullName(value)))
+        return quoteString(string.format("Instance<%s>", __CBX.safeFullName(value)))
     end
     if robloxType == "Vector2" then
         return string.format("Vector2.new(%s, %s)", tostring(value.X), tostring(value.Y))
@@ -201,7 +203,7 @@ local function serializeValue(value, depth, seen, maxItems)
         return quoteString(tostring(value))
     end
     if luaType == "function" then
-        local info = getFunctionInfo(value)
+        local info = __CBX.getFunctionInfo(value)
         return quoteString(string.format("function<%s|%s>", tostring(info.name or "anonymous"), tostring(info.source or "unknown")))
     end
     if luaType == "table" then
@@ -219,8 +221,8 @@ local function serializeValue(value, depth, seen, maxItems)
                 count = count + 1
                 if count > maxItems then break end
                 table.insert(items, {
-                    Key = serializeValue(k, depth + 1, seen, maxItems),
-                    Value = serializeValue(v, depth + 1, seen, maxItems)
+                    Key = __CBX.serializeValue(k, depth + 1, seen, maxItems),
+                    Value = __CBX.serializeValue(v, depth + 1, seen, maxItems)
                 })
             end
         end)
@@ -241,7 +243,7 @@ local function serializeValue(value, depth, seen, maxItems)
     return quoteString(string.format("%s<%s>", robloxType, tostring(value)))
 end
 
-local function normalizeValue(value, depth, seen)
+function __CBX.normalizeValue(value, depth, seen)
     depth = depth or 0
     seen = seen or {}
     local luaType = type(value)
@@ -256,10 +258,10 @@ local function normalizeValue(value, depth, seen)
         return value
     end
     if robloxType == "Instance" then
-        return { Type = "Instance", Class = value.ClassName, Path = safeFullName(value) }
+        return { Type = "Instance", Class = value.ClassName, Path = __CBX.safeFullName(value) }
     end
     if luaType == "function" then
-        local info = getFunctionInfo(value)
+        local info = __CBX.getFunctionInfo(value)
         return { Type = "function", Name = tostring(info.name or "anonymous"), Source = tostring(info.source or "unknown") }
     end
     if luaType == "table" then
@@ -272,7 +274,7 @@ local function normalizeValue(value, depth, seen)
             for k, v in pairs(value) do
                 count = count + 1
                 if count > 80 then break end
-                out[tostring(k)] = normalizeValue(v, depth + 1, seen)
+                out[tostring(k)] = __CBX.normalizeValue(v, depth + 1, seen)
             end
         end)
         seen[value] = nil
@@ -283,7 +285,7 @@ local function normalizeValue(value, depth, seen)
 end
 
 local function safeToString(value)
-    return serializeValue(value, 0, {}, 64)
+    return __CBX.serializeValue(value, 0, {}, 64)
 end
 
 local function wrapSource(code)
@@ -358,17 +360,17 @@ local function appendText(path, content)
     if appendFile then
         local ok, err = pcall(function() appendFile(path, content) end)
         if ok then return true, nil end
-        if not readFile then return false, tostring(err) end
+        if not __CBX.readFile then return false, tostring(err) end
     end
-    if readFile and writeFile then
+    if __CBX.readFile and writeFile then
         local previous = ""
-        pcall(function() previous = readFile(path) or "" end)
+        pcall(function() previous = __CBX.readFile(path) or "" end)
         return writeText(path, previous .. content)
     end
     return false, "APPEND_UNAVAILABLE"
 end
 
-local function logFailure(context, err)
+function __CBX.logFailure(context, err)
     safeMakeDir(rootDirectory)
     local line = string.format("[%s] %s\n%s\n%s\n", os.date("!%Y-%m-%dT%H:%M:%SZ"), tostring(context), tostring(err), string.rep("-", 80))
     local ok = appendText(string.format("%s/_ERROR_LOG.txt", rootDirectory), line)
@@ -406,25 +408,33 @@ local function isDecompileValid(source)
     return true
 end
 
-local ScriptArtifacts = setmetatable({}, { __mode = "k" })
+__CBX.ScriptArtifacts = setmetatable({}, { __mode = "k" })
 
-local function getFunctionProtos(fn)
+function __CBX.getFunctionProtos(fn)
     local protos = {}
-    if getProtosFunc then
+    if __CBX.getProtosFunc then
         pcall(function()
-            local result = getProtosFunc(fn)
+            local result = __CBX.getProtosFunc(fn)
             if type(result) == "table" then protos = result end
         end)
-    elseif getProtoFunc then
+    elseif __CBX.getProtoFunc then
         for i = 1, 128 do
-            local ok, proto = pcall(function() return getProtoFunc(fn, i, true) end)
+            local ok, proto = pcall(function() return __CBX.getProtoFunc(fn, i, true) end)
+            if not ok then
+                ok, proto = pcall(function() return __CBX.getProtoFunc(fn, i) end)
+            end
             if not ok or proto == nil then break end
-            table.insert(protos, proto)
+            if type(proto) == "table" then
+                for _, item in ipairs(proto) do
+                    if type(item) == "function" then table.insert(protos, item) end
+                end
+            elseif type(proto) == "function" then
+                table.insert(protos, proto)
+            end
         end
     end
     return protos
 end
-
 local function inspectFunction(fn, depth, visited)
     depth = depth or 0
     visited = visited or {}
@@ -433,13 +443,13 @@ local function inspectFunction(fn, depth, visited)
     if depth > 6 then return "function(...) end" end
     if type(fn) ~= "function" or visited[fn] then return "function(...) end" end
     visited[fn] = true
-    local info = getFunctionInfo(fn)
+    local info = __CBX.getFunctionInfo(fn)
     local params = {}
     local numParams = tonumber(info.numparams) or 0
     for i = 1, numParams do params[i] = "arg" .. i end
     if info.is_vararg == true or info.is_vararg == 1 then table.insert(params, "...") end
     local lines = { string.format("%sfunction(%s)", pad, table.concat(params, ", ")) }
-    table.insert(lines, inner .. "local FUNCTION_INFO = " .. serializeValue({
+    table.insert(lines, inner .. "local FUNCTION_INFO = " .. __CBX.serializeValue({
         name = info.name,
         source = info.source or info.short_src,
         currentline = info.currentline,
@@ -459,7 +469,7 @@ local function inspectFunction(fn, depth, visited)
         for k in pairs(constants) do table.insert(keys, k) end
         table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
         for _, k in ipairs(keys) do
-            table.insert(lines, string.format("%s    [%s] = %s,", inner, serializeValue(k), serializeValue(constants[k], 0, {}, 80)))
+            table.insert(lines, string.format("%s    [%s] = %s,", inner, __CBX.serializeValue(k), __CBX.serializeValue(constants[k], 0, {}, 80)))
         end
         table.insert(lines, inner .. "}")
     end
@@ -474,12 +484,12 @@ local function inspectFunction(fn, depth, visited)
         table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
         for _, k in ipairs(keys) do
             local value = upvalues[k]
-            local formatted = type(value) == "function" and inspectFunction(value, depth + 2, visited) or serializeValue(value, 0, {}, 80)
-            table.insert(lines, string.format("%s    [%s] = %s,", inner, serializeValue(k), formatted))
+            local formatted = type(value) == "function" and inspectFunction(value, depth + 2, visited) or __CBX.serializeValue(value, 0, {}, 80)
+            table.insert(lines, string.format("%s    [%s] = %s,", inner, __CBX.serializeValue(k), formatted))
         end
         table.insert(lines, inner .. "}")
     end
-    local protos = getFunctionProtos(fn)
+    local protos = __CBX.getFunctionProtos(fn)
     if #protos > 0 then
         table.insert(lines, inner .. "local PROTOS = {")
         for index, proto in ipairs(protos) do
@@ -494,7 +504,7 @@ local function inspectFunction(fn, depth, visited)
     return table.concat(lines, "\n")
 end
 
-local function bytesToHex(value)
+function __CBX.bytesToHex(value)
     return (value:gsub(".", function(c) return string.format("%02x", string.byte(c)) end))
 end
 
@@ -531,7 +541,7 @@ local function resolveSource(inst)
         if closureOk and type(closure) == "function" then
             resolvedClosure = closure
             artifacts.ClosureAvailable = true
-            artifacts.ClosureInfo = normalizeValue(getFunctionInfo(closure))
+            artifacts.ClosureInfo = __CBX.normalizeValue(__CBX.getFunctionInfo(closure))
             if not bestCode then
                 local reconstructed = inspectFunction(closure, 0, {})
                 if type(reconstructed) == "string" and #reconstructed > 0 then
@@ -544,19 +554,19 @@ local function resolveSource(inst)
     local bytecode = nil
     if getBytecodeFunc then
         pcall(function() bytecode = getBytecodeFunc(inst) end)
-    elseif dumpStringFunc and resolvedClosure then
-        pcall(function() bytecode = dumpStringFunc(resolvedClosure) end)
+    elseif __CBX.dumpStringFunc and resolvedClosure then
+        pcall(function() bytecode = __CBX.dumpStringFunc(resolvedClosure) end)
     end
     if type(bytecode) == "string" and #bytecode > 0 then
         artifacts.Bytecode = bytecode
         artifacts.BytecodeLength = #bytecode
         artifacts.BytecodeHash = computeHash(bytecode)
         if not bestCode then
-            bestCode = string.format("local raw_bytecode_length = %d\nlocal raw_bytecode_hash = %s\nlocal raw_bytecode_hex = %s\nreturn raw_bytecode_hex", #bytecode, quoteString(artifacts.BytecodeHash), quoteString(bytesToHex(bytecode)))
+            bestCode = string.format("local raw_bytecode_length = %d\nlocal raw_bytecode_hash = %s\nlocal raw_bytecode_hex = %s\nreturn raw_bytecode_hex", #bytecode, quoteString(artifacts.BytecodeHash), quoteString(__CBX.bytesToHex(bytecode)))
             bestMethod = "RAW_BYTECODE"
         end
     end
-    ScriptArtifacts[inst] = artifacts
+    __CBX.ScriptArtifacts[inst] = artifacts
     if bestCode then return bestCode, bestMethod end
     return "return nil", "FAILED"
 end
@@ -585,17 +595,17 @@ local function getClassName(inst)
     return result
 end
 
-local function getInstanceMetadata(inst)
+function __CBX.getInstanceMetadata(inst)
     local metadata = {
         Name = tostring(inst.Name),
         Class = getClassName(inst),
-        Path = safeFullName(inst),
-        Parent = inst.Parent and safeFullName(inst.Parent) or nil,
+        Path = __CBX.safeFullName(inst),
+        Parent = inst.Parent and __CBX.safeFullName(inst.Parent) or nil,
         Attributes = {},
         Tags = {}
     }
-    pcall(function() metadata.Attributes = normalizeValue(inst:GetAttributes()) end)
-    pcall(function() metadata.Tags = CollectionService:GetTags(inst) end)
+    pcall(function() metadata.Attributes = __CBX.normalizeValue(inst:GetAttributes()) end)
+    pcall(function() metadata.Tags = __CBX.CollectionService:GetTags(inst) end)
     pcall(function() metadata.Archivable = inst.Archivable end)
     if inst:IsA("LocalScript") or inst:IsA("Script") then
         pcall(function() metadata.Enabled = inst.Enabled end)
@@ -631,7 +641,7 @@ local function buildDeterministicPath(origin, hierarchy, scriptName)
 end
 
 local function makeFileHeader(entry, code)
-    local artifacts = ScriptArtifacts[entry.Instance] or {}
+    local artifacts = __CBX.ScriptArtifacts[entry.Instance] or {}
     local lines = {
         "--------------------------------------------------------------------------------",
         "Generated by Colors - Blue",
@@ -648,8 +658,8 @@ local function makeFileHeader(entry, code)
         string.format("BYTECODE_LENGTH = %d", tonumber(artifacts.BytecodeLength) or 0),
         string.format("BYTECODE_HASH   = %s", quoteString(artifacts.BytecodeHash or "UNAVAILABLE")),
         string.format("CLOSURE_FOUND   = %s", tostring(artifacts.ClosureAvailable == true)),
-        string.format("ATTEMPTS        = %s", serializeValue(artifacts.Attempts or {}, 0, {}, 20)),
-        string.format("METADATA        = %s", serializeValue(entry.Metadata or getInstanceMetadata(entry.Instance), 0, {}, 100)),
+        string.format("ATTEMPTS        = %s", __CBX.serializeValue(artifacts.Attempts or {}, 0, {}, 20)),
+        string.format("METADATA        = %s", __CBX.serializeValue(entry.Metadata or __CBX.getInstanceMetadata(entry.Instance), 0, {}, 100)),
         "DATA_BEGIN"
     }
     return table.concat(lines, "\n")
@@ -2348,7 +2358,7 @@ collectScriptTargets = function(mode)
         if cachedEntry and cachedEntry.FullPath == fullPath and cachedEntry.CanonicalId == canonicalId then
             entry = cachedEntry
             entry.SearchBlob = searchBlob
-            entry.Metadata = entry.Metadata or getInstanceMetadata(inst)
+            entry.Metadata = entry.Metadata or __CBX.getInstanceMetadata(inst)
         else
             entry = {
                 Instance = inst,
@@ -2361,7 +2371,7 @@ collectScriptTargets = function(mode)
                 ResolvedCode = nil,
                 Hash = nil,
                 Threat = nil,
-                Metadata = getInstanceMetadata(inst)
+                Metadata = __CBX.getInstanceMetadata(inst)
             }
             AppState.RegistryCache[inst] = entry
         end
@@ -2466,18 +2476,18 @@ collectRemoteTargets = function(mode)
     for _, inst in ipairs(nilInstances) do
         if typeof(inst) == "Instance" then scanTree(inst) end
     end
-    table.sort(remoteList, function(a, b) return safeFullName(a):lower() < safeFullName(b):lower() end)
+    table.sort(remoteList, function(a, b) return __CBX.safeFullName(a):lower() < __CBX.safeFullName(b):lower() end)
     return remoteList
 end
 
-local function describeConnection(connection)
+function __CBX.describeConnection(connection)
     local record = { Enabled = nil, ForeignState = nil, Function = nil }
     pcall(function() record.Enabled = connection.Enabled end)
     pcall(function() record.ForeignState = connection.ForeignState end)
     local fn = nil
     pcall(function() fn = connection.Function end)
     if type(fn) == "function" then
-        local info = getFunctionInfo(fn)
+        local info = __CBX.getFunctionInfo(fn)
         record.Function = {
             Name = tostring(info.name or "anonymous"),
             Source = tostring(info.source or info.short_src or "unknown"),
@@ -2486,73 +2496,74 @@ local function describeConnection(connection)
         }
         local constants = {}
         if getConsts then pcall(function() constants = getConsts(fn) or {} end) end
-        record.Function.Constants = normalizeValue(constants)
+        record.Function.Constants = __CBX.normalizeValue(constants)
     end
     return record
 end
 
-local function buildRemoteRecord(remote)
-    local record = getInstanceMetadata(remote)
+function __CBX.buildRemoteRecord(remote)
+    local record = __CBX.getInstanceMetadata(remote)
     record.ClientConnections = {}
-    if (remote:IsA("RemoteEvent") or remote:IsA("UnreliableRemoteEvent")) and getConnectionsFunc then
+    if (remote:IsA("RemoteEvent") or remote:IsA("UnreliableRemoteEvent")) and __CBX.getConnectionsFunc then
         local connections = {}
-        pcall(function() connections = getConnectionsFunc(remote.OnClientEvent) or {} end)
+        pcall(function() connections = __CBX.getConnectionsFunc(remote.OnClientEvent) or {} end)
         for index, connection in ipairs(connections) do
             if index > 128 then break end
-            table.insert(record.ClientConnections, describeConnection(connection))
+            table.insert(record.ClientConnections, __CBX.describeConnection(connection))
         end
     end
     if remote:IsA("RemoteFunction") then
         local fn = nil
         pcall(function() fn = remote.OnClientInvoke end)
         if type(fn) == "function" then
-            record.OnClientInvoke = describeConnection({ Function = fn })
+            record.OnClientInvoke = __CBX.describeConnection({ Function = fn })
         end
     end
     return record
 end
 
-local function getExecutorName()
-    if not identifyExecutorFunc then return "Unknown" end
-    local ok, a, b = pcall(identifyExecutorFunc)
+function __CBX.getExecutorName()
+    if not __CBX.identifyExecutorFunc then return "Unknown" end
+    local ok, a, b = pcall(__CBX.identifyExecutorFunc)
     if not ok then return "Unknown" end
     if b ~= nil then return tostring(a) .. " " .. tostring(b) end
     return tostring(a)
 end
 
-local function getCapabilities()
+function __CBX.getCapabilities()
     return {
-        Executor = getExecutorName(),
+        Executor = __CBX.getExecutorName(),
         Decompile = decompileFunc ~= nil,
-        ScriptBytecode = getBytecodeFunc ~= nil or dumpStringFunc ~= nil,
+        ScriptBytecode = getBytecodeFunc ~= nil or __CBX.dumpStringFunc ~= nil,
         ScriptClosure = getScriptClosureFunc ~= nil,
         LoadedModules = type(getloadedmodules) == "function",
         NilInstances = type(getnilinstances) == "function",
-        GetGC = getGCFunc ~= nil,
-        GetConnections = getConnectionsFunc ~= nil,
+        GetGC = __CBX.getGCFunc ~= nil,
+        GetConnections = __CBX.getConnectionsFunc ~= nil,
         GetConstants = getConsts ~= nil,
         GetUpvalues = getUpvals ~= nil,
-        GetProtos = getProtosFunc ~= nil or getProtoFunc ~= nil,
-        GetEnv = getEnvFunc ~= nil,
-        HookMetamethod = hookMetaMethodFunc ~= nil,
-        GetNamecallMethod = getNamecallMethodFunc ~= nil,
-        CallingScript = getCallingScriptFunc ~= nil,
+        GetProtos = __CBX.getProtosFunc ~= nil or __CBX.getProtoFunc ~= nil,
+        GetEnv = __CBX.getEnvFunc ~= nil,
+        HookMetamethod = __CBX.hookMetaMethodFunc ~= nil,
+        GetNamecallMethod = __CBX.getNamecallMethodFunc ~= nil,
+        GetRawMetatable = __CBX.getRawMetatableFunc ~= nil,
+        CallingScript = __CBX.getCallingScriptFunc ~= nil,
         WriteFile = writeFile ~= nil,
         AppendFile = appendFile ~= nil,
-        ReadFile = readFile ~= nil
+        ReadFile = __CBX.readFile ~= nil
     }
 end
 
-local function exportCapabilities()
+function __CBX.exportCapabilities()
     safeMakeDir(rootDirectory)
-    local ok, encoded = pcall(HttpService.JSONEncode, HttpService, getCapabilities())
+    local ok, encoded = pcall(HttpService.JSONEncode, HttpService, __CBX.getCapabilities())
     if ok then writeText(string.format("%s/_CAPABILITIES.json", rootDirectory), encoded) end
 end
 
-local function exportRemoteMap(mode)
+function __CBX.exportRemoteMap(mode)
     local records = {}
     for index, remote in ipairs(collectRemoteTargets(mode)) do
-        records[index] = buildRemoteRecord(remote)
+        records[index] = __CBX.buildRemoteRecord(remote)
         if index % 30 == 0 then task.wait() end
     end
     local payload = {
@@ -2567,11 +2578,11 @@ local function exportRemoteMap(mode)
     return records
 end
 
-local function getFunctionOwner(fn)
-    if not getEnvFunc then return nil end
+function __CBX.getFunctionOwner(fn)
+    if not __CBX.getEnvFunc then return nil end
     local owner = nil
     pcall(function()
-        local env = getEnvFunc(fn)
+        local env = __CBX.getEnvFunc(fn)
         if type(env) == "table" then
             local candidate = rawget(env, "script")
             if typeof(candidate) == "Instance" then owner = candidate end
@@ -2580,10 +2591,10 @@ local function getFunctionOwner(fn)
     return owner
 end
 
-local function exportRuntimeClosures(mode)
-    if not getGCFunc then return 0 end
+function __CBX.exportRuntimeClosures(mode)
+    if not __CBX.getGCFunc then return 0 end
     local objects = {}
-    local ok = pcall(function() objects = getGCFunc(true) or {} end)
+    local ok = pcall(function() objects = __CBX.getGCFunc(true) or {} end)
     if not ok then return 0 end
     local chunks = {}
     local count = 0
@@ -2595,16 +2606,16 @@ local function exportRuntimeClosures(mode)
         if type(value) == "function" and not seen[value] then
             seen[value] = true
             local isLua = true
-            if isLClosureFunc then pcall(function() isLua = isLClosureFunc(value) end) end
+            if __CBX.isLClosureFunc then pcall(function() isLua = __CBX.isLClosureFunc(value) end) end
             if isLua then
-                local owner = getFunctionOwner(value)
-                local info = getFunctionInfo(value)
+                local owner = __CBX.getFunctionOwner(value)
+                local info = __CBX.getFunctionInfo(value)
                 local source = tostring(info.source or info.short_src or "")
                 local include = mode == "FULL" or owner ~= nil or (source ~= "" and source ~= "=[C]")
                 if include then
                     count = count + 1
-                    local ownerPath = owner and safeFullName(owner) or "UNRESOLVED"
-                    table.insert(chunks, string.format("RUNTIME_CLOSURE_INDEX = %d\nOWNER = %s\nINFO = %s\nDATA_BEGIN\nlocal RUNTIME_CLOSURE = %s\nreturn RUNTIME_CLOSURE\nDATA_END\n%s", count, quoteString(ownerPath), serializeValue(info, 0, {}, 50), inspectFunction(value, 0, {}), string.rep("-", 80)))
+                    local ownerPath = owner and __CBX.safeFullName(owner) or "UNRESOLVED"
+                    table.insert(chunks, string.format("RUNTIME_CLOSURE_INDEX = %d\nOWNER = %s\nINFO = %s\nDATA_BEGIN\nlocal RUNTIME_CLOSURE = %s\nreturn RUNTIME_CLOSURE\nDATA_END\n%s", count, quoteString(ownerPath), __CBX.serializeValue(info, 0, {}, 50), inspectFunction(value, 0, {}), string.rep("-", 80)))
                     if count >= maxClosures then break end
                 end
             end
@@ -2617,115 +2628,152 @@ local function exportRuntimeClosures(mode)
     return count
 end
 
-local RuntimeTrace = {
+__CBX.RuntimeTrace = {
     Enabled = false,
     Hooked = false,
     OldNamecall = nil,
     Events = {},
     InboundConnections = {},
+    InboundFunctionOriginals = {},
     MaxEvents = 12000,
     Dropped = 0,
     StartedAt = nil
 }
 
-local function pushRuntimeTrace(direction, remote, method, args, results)
-    if #RuntimeTrace.Events >= RuntimeTrace.MaxEvents then
-        RuntimeTrace.Dropped = RuntimeTrace.Dropped + 1
+function __CBX.pushRuntimeTrace(direction, remote, method, args, results)
+    if #__CBX.RuntimeTrace.Events >= __CBX.RuntimeTrace.MaxEvents then
+        __CBX.RuntimeTrace.Dropped = __CBX.RuntimeTrace.Dropped + 1
         return
     end
     local caller = nil
-    if getCallingScriptFunc then pcall(function() caller = getCallingScriptFunc() end) end
-    table.insert(RuntimeTrace.Events, {
+    if __CBX.getCallingScriptFunc then pcall(function() caller = __CBX.getCallingScriptFunc() end) end
+    local callerState = nil
+    if __CBX.checkCallerFunc then pcall(function() callerState = __CBX.checkCallerFunc() end) end
+    table.insert(__CBX.RuntimeTrace.Events, {
         Time = os.clock(),
         Direction = direction,
         Method = method,
-        Remote = safeFullName(remote),
+        Remote = __CBX.safeFullName(remote),
         Class = getClassName(remote),
-        Caller = caller and safeFullName(caller) or nil,
-        CheckCaller = checkCallerFunc and checkCallerFunc() or nil,
-        Args = normalizeValue(args),
-        Results = normalizeValue(results)
+        Caller = caller and __CBX.safeFullName(caller) or nil,
+        CheckCaller = callerState,
+        Args = __CBX.normalizeValue(args),
+        Results = __CBX.normalizeValue(results)
     })
 end
-
-local function installNamecallTrace()
-    if RuntimeTrace.Hooked then return true end
-    if not hookMetaMethodFunc or not getNamecallMethodFunc then return false, "NAMECALL_HOOK_UNAVAILABLE" end
-    local old
+function __CBX.installNamecallTrace()
+    if __CBX.RuntimeTrace.Hooked then return true end
+    if not __CBX.hookMetaMethodFunc or not __CBX.getNamecallMethodFunc then return false, "NAMECALL_HOOK_UNAVAILABLE" end
+    local old = nil
+    local fallbackOld = nil
+    if __CBX.getRawMetatableFunc then
+        pcall(function()
+            local mt = __CBX.getRawMetatableFunc(game)
+            if type(mt) == "table" then fallbackOld = rawget(mt, "__namecall") end
+        end)
+    end
     local function handler(self, ...)
-        local method = getNamecallMethodFunc()
-        local className = typeof(self) == "Instance" and self.ClassName or ""
-        local shouldTrace = RuntimeTrace.Enabled and (className == "RemoteEvent" or className == "RemoteFunction" or className == "UnreliableRemoteEvent") and (method == "FireServer" or method == "InvokeServer")
+        local method = nil
+        pcall(function() method = __CBX.getNamecallMethodFunc() end)
+        local className = ""
+        if typeof(self) == "Instance" then pcall(function() className = self.ClassName end) end
+        local target = old or fallbackOld
+        if type(target) ~= "function" then return nil end
+        local shouldTrace = __CBX.RuntimeTrace.Enabled and (className == "RemoteEvent" or className == "RemoteFunction" or className == "UnreliableRemoteEvent") and (method == "FireServer" or method == "InvokeServer")
         if shouldTrace then
             local args = table.pack(...)
             if method == "InvokeServer" then
-                local results = table.pack(old(self, ...))
-                pushRuntimeTrace("OUT", self, method, args, results)
+                local results = table.pack(target(self, ...))
+                __CBX.pushRuntimeTrace("OUT", self, method, args, results)
                 return table.unpack(results, 1, results.n)
             end
-            pushRuntimeTrace("OUT", self, method, args, nil)
+            __CBX.pushRuntimeTrace("OUT", self, method, args, nil)
         end
-        return old(self, ...)
+        return target(self, ...)
     end
-    local wrapped = newCClosureFunc and newCClosureFunc(handler) or handler
-    local ok, result = pcall(function() return hookMetaMethodFunc(game, "__namecall", wrapped) end)
+    local wrapped = handler
+    if __CBX.newCClosureFunc then
+        local okWrap, resultWrap = pcall(__CBX.newCClosureFunc, handler)
+        if okWrap and type(resultWrap) == "function" then wrapped = resultWrap end
+    end
+    local ok, result = pcall(function() return __CBX.hookMetaMethodFunc(game, "__namecall", wrapped) end)
     if not ok then return false, tostring(result) end
-    old = result
-    RuntimeTrace.OldNamecall = old
-    RuntimeTrace.Hooked = true
+    if type(result) == "function" then old = result end
+    if type(old) ~= "function" and type(fallbackOld) == "function" then old = fallbackOld end
+    if type(old) ~= "function" then return false, "NAMECALL_ORIGINAL_UNAVAILABLE" end
+    __CBX.RuntimeTrace.OldNamecall = old
+    __CBX.RuntimeTrace.Hooked = true
     return true
 end
-
-local function attachInboundTrace()
-    for _, connection in ipairs(RuntimeTrace.InboundConnections) do pcall(function() connection:Disconnect() end) end
-    RuntimeTrace.InboundConnections = {}
+function __CBX.attachInboundTrace()
+    for _, connection in ipairs(__CBX.RuntimeTrace.InboundConnections) do pcall(function() connection:Disconnect() end) end
+    __CBX.RuntimeTrace.InboundConnections = {}
+    __CBX.RuntimeTrace.InboundFunctionOriginals = {}
     for _, remote in ipairs(collectRemoteTargets("FULL")) do
         if remote:IsA("RemoteEvent") or remote:IsA("UnreliableRemoteEvent") then
             local ok, connection = pcall(function()
                 return remote.OnClientEvent:Connect(function(...)
-                    if RuntimeTrace.Enabled then pushRuntimeTrace("IN", remote, "OnClientEvent", table.pack(...), nil) end
+                    if __CBX.RuntimeTrace.Enabled then __CBX.pushRuntimeTrace("IN", remote, "OnClientEvent", table.pack(...), nil) end
                 end)
             end)
-            if ok and connection then table.insert(RuntimeTrace.InboundConnections, connection) end
+            if ok and connection then table.insert(__CBX.RuntimeTrace.InboundConnections, connection) end
+        elseif remote:IsA("RemoteFunction") then
+            local original = nil
+            pcall(function() original = remote.OnClientInvoke end)
+            if type(original) == "function" then
+                __CBX.RuntimeTrace.InboundFunctionOriginals[remote] = original
+                pcall(function()
+                    remote.OnClientInvoke = function(...)
+                        local args = table.pack(...)
+                        local results = table.pack(original(...))
+                        if __CBX.RuntimeTrace.Enabled then __CBX.pushRuntimeTrace("IN", remote, "OnClientInvoke", args, results) end
+                        return table.unpack(results, 1, results.n)
+                    end
+                end)
+            end
         end
     end
 end
-
-local function saveRuntimeTrace()
+function __CBX.saveRuntimeTrace()
     safeMakeDir(rootDirectory)
     local payload = {
         PlaceId = placeId,
         GameId = gameId,
         JobId = jobId,
-        StartedAt = RuntimeTrace.StartedAt,
+        StartedAt = __CBX.RuntimeTrace.StartedAt,
         StoppedAt = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-        EventCount = #RuntimeTrace.Events,
-        Dropped = RuntimeTrace.Dropped,
-        Events = RuntimeTrace.Events
+        EventCount = #__CBX.RuntimeTrace.Events,
+        Dropped = __CBX.RuntimeTrace.Dropped,
+        Events = __CBX.RuntimeTrace.Events
     }
     local ok, encoded = pcall(HttpService.JSONEncode, HttpService, payload)
     if ok then return writeText(string.format("%s/_REMOTE_TRACE.json", rootDirectory), encoded) end
     return false, "TRACE_JSON_FAILED"
 end
 
-local function startRuntimeCapture()
-    local ok, err = installNamecallTrace()
+function __CBX.startRuntimeCapture()
+    local ok, err = __CBX.installNamecallTrace()
     if not ok then return false, err end
-    RuntimeTrace.Events = {}
-    RuntimeTrace.Dropped = 0
-    RuntimeTrace.StartedAt = os.date("!%Y-%m-%dT%H:%M:%SZ")
-    RuntimeTrace.Enabled = true
-    attachInboundTrace()
+    __CBX.RuntimeTrace.Events = {}
+    __CBX.RuntimeTrace.Dropped = 0
+    __CBX.RuntimeTrace.StartedAt = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    __CBX.RuntimeTrace.Enabled = true
+    __CBX.attachInboundTrace()
     return true
 end
 
-local function stopRuntimeCapture()
-    RuntimeTrace.Enabled = false
-    for _, connection in ipairs(RuntimeTrace.InboundConnections) do pcall(function() connection:Disconnect() end) end
-    RuntimeTrace.InboundConnections = {}
-    return saveRuntimeTrace()
+function __CBX.stopRuntimeCapture()
+    __CBX.RuntimeTrace.Enabled = false
+    for _, connection in ipairs(__CBX.RuntimeTrace.InboundConnections) do pcall(function() connection:Disconnect() end) end
+    __CBX.RuntimeTrace.InboundConnections = {}
+    for remote, original in pairs(__CBX.RuntimeTrace.InboundFunctionOriginals) do
+        pcall(function()
+            if remote.Parent ~= nil then remote.OnClientInvoke = original end
+        end)
+    end
+    __CBX.RuntimeTrace.InboundFunctionOriginals = {}
+    return __CBX.saveRuntimeTrace()
 end
-
 collectTargets = function()
     if AppState.ScanMode == "TARGETED" then
         if AppState.Selected and AppState.Selected.Instance then
@@ -2984,7 +3032,7 @@ local function executeAudit(overrideMode)
 
     setBusyState(false)
     if not ok then
-        logFailure("executeAudit", err)
+        __CBX.logFailure("executeAudit", err)
         percentLabel.Text = "CHECK FAILED | _ERROR_LOG.txt"
     end
 end
@@ -3071,12 +3119,12 @@ DUMP_TIME      = %s
             ThreatLevel = entry.Threat and entry.Threat.Level or "UNSCANNED",
             ThreatConfidence = entry.Threat and entry.Threat.Confidence or "NONE",
             AnalysisComplete = entry.Threat and entry.Threat.AnalysisComplete or false,
-            BytecodeLength = ScriptArtifacts[inst] and ScriptArtifacts[inst].BytecodeLength or 0,
-            BytecodeHash = ScriptArtifacts[inst] and ScriptArtifacts[inst].BytecodeHash or "UNAVAILABLE",
-            Metadata = entry.Metadata or getInstanceMetadata(inst),
+            BytecodeLength = __CBX.ScriptArtifacts[inst] and __CBX.ScriptArtifacts[inst].BytecodeLength or 0,
+            BytecodeHash = __CBX.ScriptArtifacts[inst] and __CBX.ScriptArtifacts[inst].BytecodeHash or "UNAVAILABLE",
+            Metadata = entry.Metadata or __CBX.getInstanceMetadata(inst),
             Extraction = {
-                Attempts = ScriptArtifacts[inst] and ScriptArtifacts[inst].Attempts or {},
-                ClosureAvailable = ScriptArtifacts[inst] and ScriptArtifacts[inst].ClosureAvailable or false
+                Attempts = __CBX.ScriptArtifacts[inst] and __CBX.ScriptArtifacts[inst].Attempts or {},
+                ClosureAvailable = __CBX.ScriptArtifacts[inst] and __CBX.ScriptArtifacts[inst].ClosureAvailable or false
             }
         }
         table.insert(manifestData.Manifest, manifestEntry)
@@ -3098,7 +3146,7 @@ DUMP_TIME      = %s
             local fileHeader = makeFileHeader(entry, code)
             local fullOutput = fileHeader .. "\n" .. code .. "\nDATA_END\n"
             writeText(filePath, fullOutput)
-            local artifacts = ScriptArtifacts[inst]
+            local artifacts = __CBX.ScriptArtifacts[inst]
             if artifacts and type(artifacts.Bytecode) == "string" and #artifacts.Bytecode > 0 then
                 writeText(filePath:gsub("%.luau$", ".bytecode"), artifacts.Bytecode)
             end
@@ -3142,9 +3190,9 @@ DATA_END
     if okJson then
         writeText(manifestFilePath, encodedManifest)
     end
-    exportCapabilities()
-    exportRemoteMap(AppState.ScanMode == "TARGETED" and "SMART" or AppState.ScanMode)
-    local runtimeClosureCount = exportRuntimeClosures(AppState.ScanMode == "TARGETED" and "SMART" or AppState.ScanMode)
+    __CBX.exportCapabilities()
+    __CBX.exportRemoteMap(AppState.ScanMode == "TARGETED" and "SMART" or AppState.ScanMode)
+    local runtimeClosureCount = __CBX.exportRuntimeClosures(AppState.ScanMode == "TARGETED" and "SMART" or AppState.ScanMode)
     percentLabel.Text = string.format("DUMP COMPLETE | %d RUNTIME CLOSURES | %s", runtimeClosureCount, rootDirectory)
 end
 
@@ -3160,7 +3208,7 @@ local function executeDump(mode)
 
     setBusyState(false)
     if not ok then
-        logFailure("executeDump", err)
+        __CBX.logFailure("executeDump", err)
         percentLabel.Text = "DUMP FAILED | _ERROR_LOG.txt"
     end
 end
@@ -3432,7 +3480,7 @@ local function runDeepDiffScan()
 
     setBusyState(false)
     if not ok then
-        logFailure("runDeepDiffScan", err)
+        __CBX.logFailure("runDeepDiffScan", err)
         percentLabel.Text = "DIFF SCAN FAILED | _ERROR_LOG.txt"
     end
 end
@@ -3443,17 +3491,17 @@ createTopPill("DIFF SCAN", 74, 76, function()
 end)
 local capturePill
 capturePill = createTopPill("CAPTURE", 156, 64, function()
-    if RuntimeTrace.Enabled then
-        local ok, err = stopRuntimeCapture()
+    if __CBX.RuntimeTrace.Enabled then
+        local ok, err = __CBX.stopRuntimeCapture()
         if ok then
             capturePill.Text = "CAPTURE"
-            percentLabel.Text = string.format("TRACE SAVED | %d EVENTS", #RuntimeTrace.Events)
+            percentLabel.Text = string.format("TRACE SAVED | %d EVENTS", #__CBX.RuntimeTrace.Events)
         else
             capturePill.Text = "CAP ERR"
-            logFailure("stopRuntimeCapture", err)
+            __CBX.logFailure("stopRuntimeCapture", err)
         end
     else
-        local ok, err = startRuntimeCapture()
+        local ok, err = __CBX.startRuntimeCapture()
         if ok then
             capturePill.Text = "STOP CAP"
             percentLabel.Text = "RUNTIME CAPTURE ACTIVE"
@@ -3488,5 +3536,13 @@ makeActionBtn("Refresh", "Reload all scripts", 637, 175, function()
     collectTargets()
 end)
 
-exportCapabilities()
-collectTargets()
+pcall(__CBX.exportCapabilities)
+local startupOk, startupErr = xpcall(function()
+    collectTargets()
+end, function(e)
+    return debug.traceback(e)
+end)
+if not startupOk then
+    __CBX.logFailure("startup", startupErr)
+    percentLabel.Text = "STARTUP SCAN FAILED | _ERROR_LOG.txt"
+end
