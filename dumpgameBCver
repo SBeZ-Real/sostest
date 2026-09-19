@@ -4,6 +4,7 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local CoreGui = game:GetService("CoreGui")
 local TextService = game:GetService("TextService")
 local UserInputService = game:GetService("UserInputService")
+local CollectionService = game:GetService("CollectionService")
 
 local localPlayer = Players.LocalPlayer
 local debugLib = debug
@@ -11,15 +12,32 @@ local debugLib = debug
 local decompileFunc = type(decompile) == "function" and decompile or nil
 local getBytecodeFunc = type(getscriptbytecode) == "function" and getscriptbytecode
     or type(get_script_bytecode) == "function" and get_script_bytecode
-    or type(dumpstring) == "function" and dumpstring
     or nil
-
+local dumpStringFunc = type(dumpstring) == "function" and dumpstring or nil
 local getScriptClosureFunc = type(getscriptclosure) == "function" and getscriptclosure
     or type(get_script_closure) == "function" and get_script_closure
     or nil
+local getNil = type(getnilinstances) == "function" and getnilinstances or function() return {} end
+local getModules = type(getloadedmodules) == "function" and getloadedmodules or function() return {} end
+local getGCFunc = type(getgc) == "function" and getgc or nil
+local getConnectionsFunc = type(getconnections) == "function" and getconnections or nil
+local getEnvFunc = type(getfenv) == "function" and getfenv or nil
+local isLClosureFunc = type(islclosure) == "function" and islclosure or nil
+local getCallingScriptFunc = type(getcallingscript) == "function" and getcallingscript or nil
+local hookMetaMethodFunc = type(hookmetamethod) == "function" and hookmetamethod or nil
+local getNamecallMethodFunc = type(getnamecallmethod) == "function" and getnamecallmethod or nil
+local checkCallerFunc = type(checkcaller) == "function" and checkcaller or nil
+local newCClosureFunc = type(newcclosure) == "function" and newcclosure or nil
+local identifyExecutorFunc = type(identifyexecutor) == "function" and identifyexecutor or type(getexecutorname) == "function" and getexecutorname or nil
+local getInfo = debugLib and type(debugLib.getinfo) == "function" and debugLib.getinfo or type(getinfo) == "function" and getinfo or nil
+local getConsts = debugLib and type(debugLib.getconstants) == "function" and debugLib.getconstants or type(getconstants) == "function" and getconstants or nil
+local getUpvals = debugLib and type(debugLib.getupvalues) == "function" and debugLib.getupvalues or type(getupvalues) == "function" and getupvalues or nil
+local getProtosFunc = debugLib and type(debugLib.getprotos) == "function" and debugLib.getprotos or type(getprotos) == "function" and getprotos or nil
+local getProtoFunc = debugLib and type(debugLib.getproto) == "function" and debugLib.getproto or type(getproto) == "function" and getproto or nil
 
 local writeFile = type(writefile) == "function" and writefile or nil
 local appendFile = type(appendfile) == "function" and appendfile or nil
+local readFile = type(readfile) == "function" and readfile or nil
 local makeFolder = type(makefolder) == "function" and makefolder or nil
 local isFolder = type(isfolder) == "function" and isfolder or nil
 local isFile = type(isfile) == "function" and isfile or nil
@@ -28,26 +46,6 @@ local setClipboardFunc = type(setclipboard) == "function" and setclipboard
     or type(toclipboard) == "function" and toclipboard
     or type(writeclipboard) == "function" and writeclipboard
     or (Clipboard and type(Clipboard.set) == "function" and Clipboard.set)
-    or nil
-
-local getNil = type(getnilinstances) == "function" and getnilinstances or function()
-    return {}
-end
-
-local getModules = type(getloadedmodules) == "function" and getloadedmodules or function()
-    return {}
-end
-
-local getInfo = debugLib and type(debugLib.getinfo) == "function" and debugLib.getinfo
-    or type(getinfo) == "function" and getinfo
-    or nil
-
-local getConsts = debugLib and type(debugLib.getconstants) == "function" and debugLib.getconstants
-    or type(getconstants) == "function" and getconstants
-    or nil
-
-local getUpvals = debugLib and type(debugLib.getupvalues) == "function" and debugLib.getupvalues
-    or type(getupvalues) == "function" and getupvalues
     or nil
 
 local COLORS = {
@@ -74,27 +72,32 @@ local COLORS = {
     ThreatFailed = Color3.fromRGB(215, 95, 135)
 }
 
+local function multiply32(a, b)
+    local aLow = bit32.band(a, 0xFFFF)
+    local aHigh = bit32.rshift(a, 16)
+    local bLow = bit32.band(b, 0xFFFF)
+    local bHigh = bit32.rshift(b, 16)
+    local low = aLow * bLow
+    local middle = aHigh * bLow + aLow * bHigh
+    return bit32.band(low + bit32.lshift(bit32.band(middle, 0xFFFF), 16), 0xFFFFFFFF)
+end
+
 local function computeHash(str)
     if type(str) ~= "string" or #str == 0 then
         return "00000000"
     end
     local h = 2166136261
     for i = 1, #str do
-        h = bit32.bxor(h, string.byte(str, i))
-        local low = bit32.band(h, 0xFFFF)
-        local high = bit32.rshift(h, 16)
-        local mul_low = low * 16777619
-        local mul_high = high * 16777619
-        h = bit32.band(mul_low + bit32.lshift(bit32.band(mul_high, 0xFFFF), 16), 0xFFFFFFFF)
+        h = multiply32(bit32.bxor(h, string.byte(str, i)), 16777619)
     end
     return string.format("%08x", h)
 end
 
 local function cleanString(value)
-    local result = tostring(value or ""):gsub('[\\/:*?"<>|%c]', "_")
+    local result = tostring(value or ""):gsub('[\/:*?"<>|%c]', "_")
     result = result:gsub("%s+$", "")
-    if #result > 60 then
-        result = result:sub(1, 60)
+    if #result > 80 then
+        result = result:sub(1, 80)
     end
     if result == "" then
         return "Unnamed"
@@ -112,22 +115,175 @@ local function quoteString(value)
     return string.format("%q", tostring(value))
 end
 
-local function safeToString(value)
-    local valueType = type(value)
-    if valueType == "string" then
+local function safeFullName(inst)
+    local name = tostring(inst)
+    pcall(function()
+        name = inst:GetFullName()
+    end)
+    return name
+end
+
+local function getFunctionInfo(fn)
+    local result = {}
+    if getInfo then
+        pcall(function()
+            local info = getInfo(fn)
+            if type(info) == "table" then
+                for k, v in pairs(info) do
+                    result[k] = v
+                end
+            end
+        end)
+    end
+    if debugLib and type(debugLib.info) == "function" then
+        if result.name == nil then
+            pcall(function() result.name = debugLib.info(fn, "n") end)
+        end
+        if result.source == nil then
+            pcall(function() result.source = debugLib.info(fn, "s") end)
+        end
+        if result.numparams == nil then
+            pcall(function()
+                local n, vararg = debugLib.info(fn, "a")
+                result.numparams = n
+                result.is_vararg = vararg
+            end)
+        end
+    end
+    return result
+end
+
+local function serializeValue(value, depth, seen, maxItems)
+    depth = depth or 0
+    seen = seen or {}
+    maxItems = maxItems or 64
+    local luaType = type(value)
+    local robloxType = typeof(value)
+    if luaType == "string" then
         return quoteString(value)
     end
-    if valueType == "number" or valueType == "boolean" or valueType == "nil" then
+    if luaType == "number" then
+        if value ~= value then return "0/0" end
+        if value == math.huge then return "math.huge" end
+        if value == -math.huge then return "-math.huge" end
         return tostring(value)
     end
-    if typeof(value) == "Instance" then
-        local fullName = value.Name
-        pcall(function()
-            fullName = value:GetFullName()
-        end)
-        return string.format("Instance<%s>", fullName)
+    if luaType == "boolean" or luaType == "nil" then
+        return tostring(value)
     end
-    return valueType
+    if robloxType == "Instance" then
+        return quoteString(string.format("Instance<%s>", safeFullName(value)))
+    end
+    if robloxType == "Vector2" then
+        return string.format("Vector2.new(%s, %s)", tostring(value.X), tostring(value.Y))
+    end
+    if robloxType == "Vector3" then
+        return string.format("Vector3.new(%s, %s, %s)", tostring(value.X), tostring(value.Y), tostring(value.Z))
+    end
+    if robloxType == "Color3" then
+        return string.format("Color3.new(%s, %s, %s)", tostring(value.R), tostring(value.G), tostring(value.B))
+    end
+    if robloxType == "CFrame" then
+        local ok, values = pcall(function() return { value:GetComponents() } end)
+        if ok then
+            local parts = {}
+            for i, item in ipairs(values) do parts[i] = tostring(item) end
+            return "CFrame.new(" .. table.concat(parts, ", ") .. ")"
+        end
+    end
+    if robloxType == "UDim" then
+        return string.format("UDim.new(%s, %s)", tostring(value.Scale), tostring(value.Offset))
+    end
+    if robloxType == "UDim2" then
+        return string.format("UDim2.new(%s, %s, %s, %s)", tostring(value.X.Scale), tostring(value.X.Offset), tostring(value.Y.Scale), tostring(value.Y.Offset))
+    end
+    if robloxType == "EnumItem" or robloxType == "BrickColor" or robloxType == "NumberRange" or robloxType == "Rect" or robloxType == "Ray" then
+        return quoteString(tostring(value))
+    end
+    if luaType == "function" then
+        local info = getFunctionInfo(value)
+        return quoteString(string.format("function<%s|%s>", tostring(info.name or "anonymous"), tostring(info.source or "unknown")))
+    end
+    if luaType == "table" then
+        if seen[value] then
+            return quoteString("<cycle>")
+        end
+        if depth >= 5 then
+            return quoteString("<depth-limit>")
+        end
+        seen[value] = true
+        local items = {}
+        local count = 0
+        local ok = pcall(function()
+            for k, v in pairs(value) do
+                count = count + 1
+                if count > maxItems then break end
+                table.insert(items, {
+                    Key = serializeValue(k, depth + 1, seen, maxItems),
+                    Value = serializeValue(v, depth + 1, seen, maxItems)
+                })
+            end
+        end)
+        seen[value] = nil
+        if not ok then
+            return quoteString("<table-read-failed>")
+        end
+        table.sort(items, function(a, b) return a.Key < b.Key end)
+        local out = {}
+        for _, item in ipairs(items) do
+            table.insert(out, string.format("[%s] = %s", item.Key, item.Value))
+        end
+        if count > maxItems then
+            table.insert(out, string.format("[%s] = %s", quoteString("__TRUNCATED"), tostring(count - maxItems)))
+        end
+        return "{" .. table.concat(out, ", ") .. "}"
+    end
+    return quoteString(string.format("%s<%s>", robloxType, tostring(value)))
+end
+
+local function normalizeValue(value, depth, seen)
+    depth = depth or 0
+    seen = seen or {}
+    local luaType = type(value)
+    local robloxType = typeof(value)
+    if luaType == "nil" or luaType == "string" or luaType == "boolean" then
+        return value
+    end
+    if luaType == "number" then
+        if value ~= value or value == math.huge or value == -math.huge then
+            return tostring(value)
+        end
+        return value
+    end
+    if robloxType == "Instance" then
+        return { Type = "Instance", Class = value.ClassName, Path = safeFullName(value) }
+    end
+    if luaType == "function" then
+        local info = getFunctionInfo(value)
+        return { Type = "function", Name = tostring(info.name or "anonymous"), Source = tostring(info.source or "unknown") }
+    end
+    if luaType == "table" then
+        if seen[value] then return "<cycle>" end
+        if depth >= 4 then return "<depth-limit>" end
+        seen[value] = true
+        local out = {}
+        local count = 0
+        pcall(function()
+            for k, v in pairs(value) do
+                count = count + 1
+                if count > 80 then break end
+                out[tostring(k)] = normalizeValue(v, depth + 1, seen)
+            end
+        end)
+        seen[value] = nil
+        if count > 80 then out.__TRUNCATED = count - 80 end
+        return out
+    end
+    return { Type = robloxType, Value = tostring(value) }
+end
+
+local function safeToString(value)
+    return serializeValue(value, 0, {}, 64)
 end
 
 local function wrapSource(code)
@@ -171,23 +327,13 @@ local function safeMakeDir(path)
         current = current == "" and segment or current .. "/" .. segment
         local exists = false
         if isFolder then
-            pcall(function()
-                exists = isFolder(current)
-            end)
+            pcall(function() exists = isFolder(current) end)
         end
         if not exists then
-            local created = false
-            pcall(function()
-                makeFolder(current)
-                created = true
-            end)
-            if not created and isFolder then
-                pcall(function()
-                    exists = isFolder(current)
-                end)
-            end
-            if not exists and not isFolder then
-                return false
+            local ok = pcall(function() makeFolder(current) end)
+            if not ok and isFolder then
+                pcall(function() exists = isFolder(current) end)
+                if not exists then return false end
             end
         end
     end
@@ -195,40 +341,40 @@ local function safeMakeDir(path)
 end
 
 local function fileExists(path)
-    if not isFile then
-        return false
-    end
+    if not isFile then return false end
     local result = false
-    pcall(function()
-        result = isFile(path)
-    end)
+    pcall(function() result = isFile(path) end)
     return result
 end
 
 local function writeText(path, content)
-    if not writeFile then
-        return false, "WRITEFILE_UNAVAILABLE"
-    end
-    local ok, err = pcall(function()
-        writeFile(path, content)
-    end)
-    if not ok then
-        return false, tostring(err)
-    end
+    if not writeFile then return false, "WRITEFILE_UNAVAILABLE" end
+    local ok, err = pcall(function() writeFile(path, content) end)
+    if not ok then return false, tostring(err) end
     return true, nil
 end
 
 local function appendText(path, content)
-    if not appendFile then
-        return false, "APPENDFILE_UNAVAILABLE"
+    if appendFile then
+        local ok, err = pcall(function() appendFile(path, content) end)
+        if ok then return true, nil end
+        if not readFile then return false, tostring(err) end
     end
-    local ok, err = pcall(function()
-        appendFile(path, content)
-    end)
+    if readFile and writeFile then
+        local previous = ""
+        pcall(function() previous = readFile(path) or "" end)
+        return writeText(path, previous .. content)
+    end
+    return false, "APPEND_UNAVAILABLE"
+end
+
+local function logFailure(context, err)
+    safeMakeDir(rootDirectory)
+    local line = string.format("[%s] %s\n%s\n%s\n", os.date("!%Y-%m-%dT%H:%M:%SZ"), tostring(context), tostring(err), string.rep("-", 80))
+    local ok = appendText(string.format("%s/_ERROR_LOG.txt", rootDirectory), line)
     if not ok then
-        return false, tostring(err)
+        writeText(string.format("%s/_ERROR_LAST.txt", rootDirectory), line)
     end
-    return true, nil
 end
 
 local function isDecompileValid(source)
@@ -244,7 +390,13 @@ local function isDecompileValid(source)
         "custom vm",
         "encode key",
         "unable to decompile",
-        "an error occurred while decompiling"
+        "an error occurred while decompiling",
+        "failed to decompile",
+        "decompile failed",
+        "unsupported opcode",
+        "bytecode version mismatch",
+        "not a lua closure",
+        "decompilation failed"
     }
     for _, pattern in ipairs(invalidPatterns) do
         if lower:find(pattern, 1, true) then
@@ -254,152 +406,166 @@ local function isDecompileValid(source)
     return true
 end
 
+local ScriptArtifacts = setmetatable({}, { __mode = "k" })
+
+local function getFunctionProtos(fn)
+    local protos = {}
+    if getProtosFunc then
+        pcall(function()
+            local result = getProtosFunc(fn)
+            if type(result) == "table" then protos = result end
+        end)
+    elseif getProtoFunc then
+        for i = 1, 128 do
+            local ok, proto = pcall(function() return getProtoFunc(fn, i, true) end)
+            if not ok or proto == nil then break end
+            table.insert(protos, proto)
+        end
+    end
+    return protos
+end
+
 local function inspectFunction(fn, depth, visited)
     depth = depth or 0
     visited = visited or {}
-    if depth > 2 then
-        return "function() end"
-    end
-    if type(fn) ~= "function" or visited[fn] then
-        return "function() end"
-    end
-    visited[fn] = true
-
     local pad = string.rep("    ", depth)
-    local innerPad = string.rep("    ", depth + 1)
-    local lines = {}
-
-    local info = {}
-    if getInfo then
-        pcall(function()
-            info = getInfo(fn) or {}
-        end)
-    end
-
-    local functionName = info.name
-    if type(functionName) ~= "string" or functionName == "" then
-        functionName = "anonymous"
-    end
-
+    local inner = string.rep("    ", depth + 1)
+    if depth > 6 then return "function(...) end" end
+    if type(fn) ~= "function" or visited[fn] then return "function(...) end" end
+    visited[fn] = true
+    local info = getFunctionInfo(fn)
+    local params = {}
     local numParams = tonumber(info.numparams) or 0
-    local parameters = {}
-    for i = 1, numParams do
-        table.insert(parameters, "arg" .. i)
-    end
-    if info.is_vararg == 1 then
-        table.insert(parameters, "...")
-    end
-
-    table.insert(lines, string.format("%sfunction %s(%s)", pad, cleanString(functionName), table.concat(parameters, ", ")))
-
+    for i = 1, numParams do params[i] = "arg" .. i end
+    if info.is_vararg == true or info.is_vararg == 1 then table.insert(params, "...") end
+    local lines = { string.format("%sfunction(%s)", pad, table.concat(params, ", ")) }
+    table.insert(lines, inner .. "local FUNCTION_INFO = " .. serializeValue({
+        name = info.name,
+        source = info.source or info.short_src,
+        currentline = info.currentline,
+        linedefined = info.linedefined,
+        lastlinedefined = info.lastlinedefined,
+        numparams = info.numparams,
+        is_vararg = info.is_vararg,
+        what = info.what
+    }, 0, {}, 32))
     local constants = {}
-    if getConsts then
-        pcall(function()
-            constants = getConsts(fn) or {}
-        end)
-    end
-    if #constants > 0 then
-        table.insert(lines, innerPad .. "local CONSTANTS = {")
-        for index, value in pairs(constants) do
-            table.insert(lines, string.format("%s    [%s] = %s,", innerPad, tostring(index), safeToString(value)))
+    if getConsts then pcall(function() constants = getConsts(fn) or {} end) end
+    local hasConstants = false
+    for _ in pairs(constants) do hasConstants = true break end
+    if hasConstants then
+        table.insert(lines, inner .. "local CONSTANTS = {")
+        local keys = {}
+        for k in pairs(constants) do table.insert(keys, k) end
+        table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+        for _, k in ipairs(keys) do
+            table.insert(lines, string.format("%s    [%s] = %s,", inner, serializeValue(k), serializeValue(constants[k], 0, {}, 80)))
         end
-        table.insert(lines, innerPad .. "}")
+        table.insert(lines, inner .. "}")
     end
-
     local upvalues = {}
-    if getUpvals then
-        pcall(function()
-            upvalues = getUpvals(fn) or {}
-        end)
-    end
-    if #upvalues > 0 then
-        table.insert(lines, innerPad .. "local UPVALUES = {")
-        for index, value in pairs(upvalues) do
-            local formatted
-            if type(value) == "function" then
-                formatted = inspectFunction(value, depth + 2, visited)
-            else
-                formatted = safeToString(value)
-            end
-            table.insert(lines, string.format("%s    [%s] = %s,", innerPad, tostring(index), formatted))
+    if getUpvals then pcall(function() upvalues = getUpvals(fn) or {} end) end
+    local hasUpvalues = false
+    for _ in pairs(upvalues) do hasUpvalues = true break end
+    if hasUpvalues then
+        table.insert(lines, inner .. "local UPVALUES = {")
+        local keys = {}
+        for k in pairs(upvalues) do table.insert(keys, k) end
+        table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+        for _, k in ipairs(keys) do
+            local value = upvalues[k]
+            local formatted = type(value) == "function" and inspectFunction(value, depth + 2, visited) or serializeValue(value, 0, {}, 80)
+            table.insert(lines, string.format("%s    [%s] = %s,", inner, serializeValue(k), formatted))
         end
-        table.insert(lines, innerPad .. "}")
+        table.insert(lines, inner .. "}")
     end
-
+    local protos = getFunctionProtos(fn)
+    if #protos > 0 then
+        table.insert(lines, inner .. "local PROTOS = {")
+        for index, proto in ipairs(protos) do
+            if type(proto) == "function" then
+                table.insert(lines, string.format("%s    [%d] = %s,", inner, index, inspectFunction(proto, depth + 2, visited)))
+            end
+        end
+        table.insert(lines, inner .. "}")
+    end
     table.insert(lines, pad .. "end")
+    visited[fn] = nil
     return table.concat(lines, "\n")
 end
 
-local function resolveSource(inst)
-    if decompileFunc then
-        local ok, result = pcall(function()
-            return decompileFunc(inst)
-        end)
-        if ok and isDecompileValid(result) then
-            return result, "DECOMPILED"
-        end
-    end
-
-    local source = ""
-    local sourceOk = pcall(function()
-        source = inst.Source
-    end)
-    if sourceOk and isDecompileValid(source) then
-        return source, "SOURCE"
-    end
-
-    if getScriptClosureFunc then
-        local closureOk, closure = pcall(function()
-            return getScriptClosureFunc(inst)
-        end)
-        if closureOk and type(closure) == "function" then
-            local reconstructed = inspectFunction(closure, 0, {})
-            if type(reconstructed) == "string" and #reconstructed > 0 then
-                return reconstructed, "RECONSTRUCTED_CLOSURE"
-            end
-        end
-    end
-
-    if getBytecodeFunc then
-        local bytecode
-        pcall(function()
-            bytecode = getBytecodeFunc(inst)
-        end)
-        if type(bytecode) == "string" and #bytecode > 0 then
-            return string.format("local raw_bytecode = %q", bytecode), "RAW_BYTECODE"
-        end
-    end
-
-    return "return nil", "FAILED"
+local function bytesToHex(value)
+    return (value:gsub(".", function(c) return string.format("%02x", string.byte(c)) end))
 end
 
-local function isOtherPlayerDescendant(inst)
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= localPlayer then
-            local character = player.Character
-            if character then
-                local inside = false
-                pcall(function()
-                    inside = inst:IsDescendantOf(character)
-                end)
-                if inside then
-                    return true
+local function resolveSource(inst)
+    local artifacts = {
+        Attempts = {},
+        Bytecode = nil,
+        BytecodeLength = 0,
+        BytecodeHash = nil,
+        ClosureAvailable = false
+    }
+    local bestCode = nil
+    local bestMethod = nil
+    local resolvedClosure = nil
+    if decompileFunc then
+        local ok, result = pcall(function() return decompileFunc(inst) end)
+        artifacts.Attempts.DECOMPILE = ok and type(result) == "string" and #result or 0
+        if ok and isDecompileValid(result) then
+            bestCode = result
+            bestMethod = "DECOMPILED"
+        end
+    end
+    if not bestCode then
+        local source = ""
+        local sourceOk = pcall(function() source = inst.Source end)
+        artifacts.Attempts.SOURCE = sourceOk and type(source) == "string" and #source or 0
+        if sourceOk and isDecompileValid(source) then
+            bestCode = source
+            bestMethod = "SOURCE"
+        end
+    end
+    if getScriptClosureFunc then
+        local closureOk, closure = pcall(function() return getScriptClosureFunc(inst) end)
+        if closureOk and type(closure) == "function" then
+            resolvedClosure = closure
+            artifacts.ClosureAvailable = true
+            artifacts.ClosureInfo = normalizeValue(getFunctionInfo(closure))
+            if not bestCode then
+                local reconstructed = inspectFunction(closure, 0, {})
+                if type(reconstructed) == "string" and #reconstructed > 0 then
+                    bestCode = "local RECONSTRUCTED_CLOSURE = " .. reconstructed .. "\nreturn RECONSTRUCTED_CLOSURE"
+                    bestMethod = "RECONSTRUCTED_CLOSURE"
                 end
             end
         end
     end
+    local bytecode = nil
+    if getBytecodeFunc then
+        pcall(function() bytecode = getBytecodeFunc(inst) end)
+    elseif dumpStringFunc and resolvedClosure then
+        pcall(function() bytecode = dumpStringFunc(resolvedClosure) end)
+    end
+    if type(bytecode) == "string" and #bytecode > 0 then
+        artifacts.Bytecode = bytecode
+        artifacts.BytecodeLength = #bytecode
+        artifacts.BytecodeHash = computeHash(bytecode)
+        if not bestCode then
+            bestCode = string.format("local raw_bytecode_length = %d\nlocal raw_bytecode_hash = %s\nlocal raw_bytecode_hex = %s\nreturn raw_bytecode_hex", #bytecode, quoteString(artifacts.BytecodeHash), quoteString(bytesToHex(bytecode)))
+            bestMethod = "RAW_BYTECODE"
+        end
+    end
+    ScriptArtifacts[inst] = artifacts
+    if bestCode then return bestCode, bestMethod end
+    return "return nil", "FAILED"
+end
+
+local function isOtherPlayerDescendant(inst)
     return false
 end
 
 local function isSystemInternal(inst)
-    local current = inst
-    while current do
-        local name = current.Name
-        if name == "CorePackages" or name == "CoreGui" or name == "RobloxGui" or name == "RobloxReplicatedStorage" then
-            return true
-        end
-        current = current.Parent
-    end
     return false
 end
 
@@ -415,47 +581,75 @@ end
 
 local function getClassName(inst)
     local result = "Unknown"
-    pcall(function()
-        result = inst.ClassName
-    end)
+    pcall(function() result = inst.ClassName end)
     return result
+end
+
+local function getInstanceMetadata(inst)
+    local metadata = {
+        Name = tostring(inst.Name),
+        Class = getClassName(inst),
+        Path = safeFullName(inst),
+        Parent = inst.Parent and safeFullName(inst.Parent) or nil,
+        Attributes = {},
+        Tags = {}
+    }
+    pcall(function() metadata.Attributes = normalizeValue(inst:GetAttributes()) end)
+    pcall(function() metadata.Tags = CollectionService:GetTags(inst) end)
+    pcall(function() metadata.Archivable = inst.Archivable end)
+    if inst:IsA("LocalScript") or inst:IsA("Script") then
+        pcall(function() metadata.Enabled = inst.Enabled end)
+        pcall(function() metadata.RunContext = tostring(inst.RunContext) end)
+    end
+    return metadata
 end
 
 local function getSafeCanonicalId(inst, origin)
     local fullName = ""
-    local ok = pcall(function()
-        fullName = inst:GetFullName()
-    end)
-    if ok and fullName ~= "" then
-        return fullName
+    pcall(function() fullName = inst:GetFullName() end)
+    if inst.Parent ~= nil and fullName ~= "" then return fullName end
+    local debugId = nil
+    pcall(function() debugId = inst:GetDebugId(32) end)
+    if debugId then
+        return string.format("[%s]:%s:%s:%s", origin, getClassName(inst), cleanString(inst.Name), debugId)
     end
     local hierarchy = getHierarchy(inst)
-    return string.format("[%s]:%s/%s", origin, table.concat(hierarchy, "/"), cleanString(inst.Name))
+    return string.format("[%s]:%s:%s/%s", origin, getClassName(inst), table.concat(hierarchy, "/"), cleanString(inst.Name))
 end
 
 local function buildDeterministicPath(origin, hierarchy, scriptName)
     local parts = { rootDirectory, cleanString(origin) }
-    for _, item in ipairs(hierarchy) do
-        table.insert(parts, cleanString(item))
+    local normalizedOrigin = cleanString(origin):lower()
+    for index, item in ipairs(hierarchy) do
+        local cleaned = cleanString(item)
+        if not (index == 1 and cleaned:lower() == normalizedOrigin) then
+            table.insert(parts, cleaned)
+        end
     end
     table.insert(parts, cleanString(scriptName))
     return table.concat(parts, "/")
 end
 
 local function makeFileHeader(entry, code)
+    local artifacts = ScriptArtifacts[entry.Instance] or {}
     local lines = {
         "--------------------------------------------------------------------------------",
         "Generated by Colors - Blue",
         "--------------------------------------------------------------------------------",
-        string.format("SCRIPT_NAME   = %s", quoteString(entry.Instance.Name)),
-        string.format("CLASS         = %s", quoteString(getClassName(entry.Instance))),
-        string.format("ORIGIN        = %s", quoteString(entry.Origin)),
-        string.format("CANONICAL_ID  = %s", quoteString(entry.CanonicalId)),
-        string.format("PATH          = %s", quoteString(entry.FullPath)),
-        string.format("METHOD        = %s", quoteString(entry.Method or "PENDING")),
-        string.format("THREAT_LEVEL  = %s", quoteString(entry.Threat and entry.Threat.Level or "UNSCANNED")),
-        string.format("SOURCE_LENGTH = %d", (entry.Method == "FAILED" or entry.Hash == "UNAVAILABLE") and 0 or #code),
-        string.format("HASH          = %s", quoteString(entry.Hash or (entry.Method == "FAILED" and "UNAVAILABLE" or computeHash(code)))),
+        string.format("SCRIPT_NAME     = %s", quoteString(entry.Instance.Name)),
+        string.format("CLASS           = %s", quoteString(getClassName(entry.Instance))),
+        string.format("ORIGIN          = %s", quoteString(entry.Origin)),
+        string.format("CANONICAL_ID    = %s", quoteString(entry.CanonicalId)),
+        string.format("PATH            = %s", quoteString(entry.FullPath)),
+        string.format("METHOD          = %s", quoteString(entry.Method or "PENDING")),
+        string.format("THREAT_LEVEL    = %s", quoteString(entry.Threat and entry.Threat.Level or "UNSCANNED")),
+        string.format("SOURCE_LENGTH   = %d", (entry.Method == "FAILED" or entry.Hash == "UNAVAILABLE") and 0 or #code),
+        string.format("HASH            = %s", quoteString(entry.Hash or (entry.Method == "FAILED" and "UNAVAILABLE" or computeHash(code)))),
+        string.format("BYTECODE_LENGTH = %d", tonumber(artifacts.BytecodeLength) or 0),
+        string.format("BYTECODE_HASH   = %s", quoteString(artifacts.BytecodeHash or "UNAVAILABLE")),
+        string.format("CLOSURE_FOUND   = %s", tostring(artifacts.ClosureAvailable == true)),
+        string.format("ATTEMPTS        = %s", serializeValue(artifacts.Attempts or {}, 0, {}, 20)),
+        string.format("METADATA        = %s", serializeValue(entry.Metadata or getInstanceMetadata(entry.Instance), 0, {}, 100)),
         "DATA_BEGIN"
     }
     return table.concat(lines, "\n")
@@ -2141,23 +2335,20 @@ collectScriptTargets = function(mode)
 
     local function pushTarget(inst, origin)
         if not inst then return end
-        local okClass, className = pcall(function()
-            return inst.ClassName
-        end)
+        local okClass, className = pcall(function() return inst.ClassName end)
         if not okClass then return end
         if className ~= "LocalScript" and className ~= "ModuleScript" then return end
-        if seen[inst] or isSystemInternal(inst) or isOtherPlayerDescendant(inst) then return end
-
+        if seen[inst] then return end
         local hierarchy = getHierarchy(inst)
         local fullPath = buildDeterministicPath(origin, hierarchy, inst.Name)
         local canonicalId = getSafeCanonicalId(inst, origin)
         local searchBlob = string.lower(string.format("%s %s %s %s %s", inst.Name, cleanString(origin), fullPath, canonicalId, className)):gsub("%s+", "")
-
         local cachedEntry = AppState.RegistryCache[inst]
         local entry
         if cachedEntry and cachedEntry.FullPath == fullPath and cachedEntry.CanonicalId == canonicalId then
             entry = cachedEntry
             entry.SearchBlob = searchBlob
+            entry.Metadata = entry.Metadata or getInstanceMetadata(inst)
         else
             entry = {
                 Instance = inst,
@@ -2169,20 +2360,28 @@ collectScriptTargets = function(mode)
                 Method = "PENDING",
                 ResolvedCode = nil,
                 Hash = nil,
-                Threat = nil
+                Threat = nil,
+                Metadata = getInstanceMetadata(inst)
             }
             AppState.RegistryCache[inst] = entry
         end
-
         seen[inst] = true
         validInstancesSet[inst] = true
         table.insert(targetList, entry)
     end
 
+    local function scanTree(root, origin)
+        if not root then return end
+        pushTarget(root, origin)
+        local descendants = {}
+        pcall(function() descendants = root:GetDescendants() end)
+        for _, inst in ipairs(descendants) do pushTarget(inst, origin) end
+    end
+
     if mode == "FULL" then
-        for _, inst in ipairs(game:GetDescendants()) do
-            pushTarget(inst, "DataModel")
-        end
+        local descendants = {}
+        pcall(function() descendants = game:GetDescendants() end)
+        for _, inst in ipairs(descendants) do pushTarget(inst, "DataModel") end
     else
         local validServices = {
             game:GetService("ReplicatedStorage"),
@@ -2192,79 +2391,59 @@ collectScriptTargets = function(mode)
             game:GetService("ReplicatedFirst"),
             game:GetService("Workspace")
         }
-
         local pScripts = localPlayer:FindFirstChild("PlayerScripts")
         local pGui = localPlayer:FindFirstChild("PlayerGui")
         local pPack = localPlayer:FindFirstChild("Backpack")
-
         if pScripts then table.insert(validServices, pScripts) end
         if pGui then table.insert(validServices, pGui) end
         if pPack then table.insert(validServices, pPack) end
+        for _, service in ipairs(validServices) do scanTree(service, service.Name) end
+    end
 
-        for _, service in ipairs(validServices) do
-            local descendants = {}
-            pcall(function()
-                descendants = service:GetDescendants()
-            end)
-            for _, inst in ipairs(descendants) do
-                pushTarget(inst, service.Name)
-            end
-        end
+    local loadedModules = {}
+    pcall(function() loadedModules = getModules() end)
+    for _, inst in ipairs(loadedModules) do
+        if typeof(inst) == "Instance" then pushTarget(inst, "LoadedModules") end
+    end
 
-        local loadedModules = {}
-        pcall(function()
-            loadedModules = getModules()
-        end)
-        for _, inst in ipairs(loadedModules) do
-            if typeof(inst) == "Instance" then
-                pushTarget(inst, "LoadedModules")
-            end
-        end
-
-        local nilInstances = {}
-        pcall(function()
-            nilInstances = getNil()
-        end)
-        for _, inst in ipairs(nilInstances) do
-            if typeof(inst) == "Instance" then
-                pushTarget(inst, "NilInstances")
-                local d = {}
-                pcall(function()
-                    d = inst:GetDescendants()
-                end)
-                for _, child in ipairs(d) do
-                    pushTarget(child, "NilInstances")
-                end
-            end
-        end
+    local nilInstances = {}
+    pcall(function() nilInstances = getNil() end)
+    for _, inst in ipairs(nilInstances) do
+        if typeof(inst) == "Instance" then scanTree(inst, "NilInstances") end
     end
 
     cleanUnreferencedCache(validInstancesSet)
-
     table.sort(targetList, function(a, b)
+        if a.FullPath == b.FullPath then return a.CanonicalId < b.CanonicalId end
         return a.FullPath:lower() < b.FullPath:lower()
     end)
-
     return targetList
 end
 
 collectRemoteTargets = function(mode)
     local remoteList = {}
     local seen = {}
-
     local function pushRemote(inst)
         if not inst or seen[inst] then return end
-        if isSystemInternal(inst) or isOtherPlayerDescendant(inst) then return end
-        if inst:IsA("RemoteEvent") or inst:IsA("RemoteFunction") or inst:IsA("UnreliableRemoteEvent") then
+        local ok, isRemote = pcall(function()
+            return inst:IsA("RemoteEvent") or inst:IsA("RemoteFunction") or inst:IsA("UnreliableRemoteEvent")
+        end)
+        if ok and isRemote then
             seen[inst] = true
             table.insert(remoteList, inst)
         end
     end
-
+    local function scanTree(root)
+        if not root then return end
+        pushRemote(root)
+        local descendants = {}
+        pcall(function() descendants = root:GetDescendants() end)
+        for _, inst in ipairs(descendants) do pushRemote(inst) end
+    end
     if mode == "FULL" then
-        for _, inst in ipairs(game:GetDescendants()) do
-            pushRemote(inst)
-        end
+        local descendants = {}
+        pcall(function() descendants = game:GetDescendants() end)
+        for _, inst in ipairs(descendants) do pushRemote(inst) end
     else
         local validServices = {
             game:GetService("ReplicatedStorage"),
@@ -2277,34 +2456,274 @@ collectRemoteTargets = function(mode)
         local pScripts = localPlayer:FindFirstChild("PlayerScripts")
         local pGui = localPlayer:FindFirstChild("PlayerGui")
         local pPack = localPlayer:FindFirstChild("Backpack")
-
         if pScripts then table.insert(validServices, pScripts) end
         if pGui then table.insert(validServices, pGui) end
         if pPack then table.insert(validServices, pPack) end
+        for _, service in ipairs(validServices) do scanTree(service) end
+    end
+    local nilInstances = {}
+    pcall(function() nilInstances = getNil() end)
+    for _, inst in ipairs(nilInstances) do
+        if typeof(inst) == "Instance" then scanTree(inst) end
+    end
+    table.sort(remoteList, function(a, b) return safeFullName(a):lower() < safeFullName(b):lower() end)
+    return remoteList
+end
 
-        for _, service in ipairs(validServices) do
-            local descendants = {}
-            pcall(function() descendants = service:GetDescendants() end)
-            for _, inst in ipairs(descendants) do
-                pushRemote(inst)
-            end
+local function describeConnection(connection)
+    local record = { Enabled = nil, ForeignState = nil, Function = nil }
+    pcall(function() record.Enabled = connection.Enabled end)
+    pcall(function() record.ForeignState = connection.ForeignState end)
+    local fn = nil
+    pcall(function() fn = connection.Function end)
+    if type(fn) == "function" then
+        local info = getFunctionInfo(fn)
+        record.Function = {
+            Name = tostring(info.name or "anonymous"),
+            Source = tostring(info.source or info.short_src or "unknown"),
+            NumParams = tonumber(info.numparams) or 0,
+            IsVararg = info.is_vararg == true or info.is_vararg == 1
+        }
+        local constants = {}
+        if getConsts then pcall(function() constants = getConsts(fn) or {} end) end
+        record.Function.Constants = normalizeValue(constants)
+    end
+    return record
+end
+
+local function buildRemoteRecord(remote)
+    local record = getInstanceMetadata(remote)
+    record.ClientConnections = {}
+    if (remote:IsA("RemoteEvent") or remote:IsA("UnreliableRemoteEvent")) and getConnectionsFunc then
+        local connections = {}
+        pcall(function() connections = getConnectionsFunc(remote.OnClientEvent) or {} end)
+        for index, connection in ipairs(connections) do
+            if index > 128 then break end
+            table.insert(record.ClientConnections, describeConnection(connection))
         end
+    end
+    if remote:IsA("RemoteFunction") then
+        local fn = nil
+        pcall(function() fn = remote.OnClientInvoke end)
+        if type(fn) == "function" then
+            record.OnClientInvoke = describeConnection({ Function = fn })
+        end
+    end
+    return record
+end
 
-        local nilInstances = {}
-        pcall(function() nilInstances = getNil() end)
-        for _, inst in ipairs(nilInstances) do
-            if typeof(inst) == "Instance" then
-                pushRemote(inst)
-                local d = {}
-                pcall(function() d = inst:GetDescendants() end)
-                for _, child in ipairs(d) do
-                    pushRemote(child)
+local function getExecutorName()
+    if not identifyExecutorFunc then return "Unknown" end
+    local ok, a, b = pcall(identifyExecutorFunc)
+    if not ok then return "Unknown" end
+    if b ~= nil then return tostring(a) .. " " .. tostring(b) end
+    return tostring(a)
+end
+
+local function getCapabilities()
+    return {
+        Executor = getExecutorName(),
+        Decompile = decompileFunc ~= nil,
+        ScriptBytecode = getBytecodeFunc ~= nil or dumpStringFunc ~= nil,
+        ScriptClosure = getScriptClosureFunc ~= nil,
+        LoadedModules = type(getloadedmodules) == "function",
+        NilInstances = type(getnilinstances) == "function",
+        GetGC = getGCFunc ~= nil,
+        GetConnections = getConnectionsFunc ~= nil,
+        GetConstants = getConsts ~= nil,
+        GetUpvalues = getUpvals ~= nil,
+        GetProtos = getProtosFunc ~= nil or getProtoFunc ~= nil,
+        GetEnv = getEnvFunc ~= nil,
+        HookMetamethod = hookMetaMethodFunc ~= nil,
+        GetNamecallMethod = getNamecallMethodFunc ~= nil,
+        CallingScript = getCallingScriptFunc ~= nil,
+        WriteFile = writeFile ~= nil,
+        AppendFile = appendFile ~= nil,
+        ReadFile = readFile ~= nil
+    }
+end
+
+local function exportCapabilities()
+    safeMakeDir(rootDirectory)
+    local ok, encoded = pcall(HttpService.JSONEncode, HttpService, getCapabilities())
+    if ok then writeText(string.format("%s/_CAPABILITIES.json", rootDirectory), encoded) end
+end
+
+local function exportRemoteMap(mode)
+    local records = {}
+    for index, remote in ipairs(collectRemoteTargets(mode)) do
+        records[index] = buildRemoteRecord(remote)
+        if index % 30 == 0 then task.wait() end
+    end
+    local payload = {
+        PlaceId = placeId,
+        JobId = jobId,
+        Timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+        Count = #records,
+        Remotes = records
+    }
+    local ok, encoded = pcall(HttpService.JSONEncode, HttpService, payload)
+    if ok then writeText(string.format("%s/_REMOTE_MAP.json", rootDirectory), encoded) end
+    return records
+end
+
+local function getFunctionOwner(fn)
+    if not getEnvFunc then return nil end
+    local owner = nil
+    pcall(function()
+        local env = getEnvFunc(fn)
+        if type(env) == "table" then
+            local candidate = rawget(env, "script")
+            if typeof(candidate) == "Instance" then owner = candidate end
+        end
+    end)
+    return owner
+end
+
+local function exportRuntimeClosures(mode)
+    if not getGCFunc then return 0 end
+    local objects = {}
+    local ok = pcall(function() objects = getGCFunc(true) or {} end)
+    if not ok then return 0 end
+    local chunks = {}
+    local count = 0
+    local scanned = 0
+    local seen = {}
+    local maxClosures = mode == "FULL" and 6000 or 2500
+    for _, value in pairs(objects) do
+        scanned = scanned + 1
+        if type(value) == "function" and not seen[value] then
+            seen[value] = true
+            local isLua = true
+            if isLClosureFunc then pcall(function() isLua = isLClosureFunc(value) end) end
+            if isLua then
+                local owner = getFunctionOwner(value)
+                local info = getFunctionInfo(value)
+                local source = tostring(info.source or info.short_src or "")
+                local include = mode == "FULL" or owner ~= nil or (source ~= "" and source ~= "=[C]")
+                if include then
+                    count = count + 1
+                    local ownerPath = owner and safeFullName(owner) or "UNRESOLVED"
+                    table.insert(chunks, string.format("RUNTIME_CLOSURE_INDEX = %d\nOWNER = %s\nINFO = %s\nDATA_BEGIN\nlocal RUNTIME_CLOSURE = %s\nreturn RUNTIME_CLOSURE\nDATA_END\n%s", count, quoteString(ownerPath), serializeValue(info, 0, {}, 50), inspectFunction(value, 0, {}), string.rep("-", 80)))
+                    if count >= maxClosures then break end
                 end
             end
         end
+        if scanned % 200 == 0 then task.wait() end
     end
+    if count > 0 then
+        writeText(string.format("%s/_RUNTIME_CLOSURES.luau", rootDirectory), table.concat(chunks, "\n"))
+    end
+    return count
+end
 
-    return remoteList
+local RuntimeTrace = {
+    Enabled = false,
+    Hooked = false,
+    OldNamecall = nil,
+    Events = {},
+    InboundConnections = {},
+    MaxEvents = 12000,
+    Dropped = 0,
+    StartedAt = nil
+}
+
+local function pushRuntimeTrace(direction, remote, method, args, results)
+    if #RuntimeTrace.Events >= RuntimeTrace.MaxEvents then
+        RuntimeTrace.Dropped = RuntimeTrace.Dropped + 1
+        return
+    end
+    local caller = nil
+    if getCallingScriptFunc then pcall(function() caller = getCallingScriptFunc() end) end
+    table.insert(RuntimeTrace.Events, {
+        Time = os.clock(),
+        Direction = direction,
+        Method = method,
+        Remote = safeFullName(remote),
+        Class = getClassName(remote),
+        Caller = caller and safeFullName(caller) or nil,
+        CheckCaller = checkCallerFunc and checkCallerFunc() or nil,
+        Args = normalizeValue(args),
+        Results = normalizeValue(results)
+    })
+end
+
+local function installNamecallTrace()
+    if RuntimeTrace.Hooked then return true end
+    if not hookMetaMethodFunc or not getNamecallMethodFunc then return false, "NAMECALL_HOOK_UNAVAILABLE" end
+    local old
+    local function handler(self, ...)
+        local method = getNamecallMethodFunc()
+        local className = typeof(self) == "Instance" and self.ClassName or ""
+        local shouldTrace = RuntimeTrace.Enabled and (className == "RemoteEvent" or className == "RemoteFunction" or className == "UnreliableRemoteEvent") and (method == "FireServer" or method == "InvokeServer")
+        if shouldTrace then
+            local args = table.pack(...)
+            if method == "InvokeServer" then
+                local results = table.pack(old(self, ...))
+                pushRuntimeTrace("OUT", self, method, args, results)
+                return table.unpack(results, 1, results.n)
+            end
+            pushRuntimeTrace("OUT", self, method, args, nil)
+        end
+        return old(self, ...)
+    end
+    local wrapped = newCClosureFunc and newCClosureFunc(handler) or handler
+    local ok, result = pcall(function() return hookMetaMethodFunc(game, "__namecall", wrapped) end)
+    if not ok then return false, tostring(result) end
+    old = result
+    RuntimeTrace.OldNamecall = old
+    RuntimeTrace.Hooked = true
+    return true
+end
+
+local function attachInboundTrace()
+    for _, connection in ipairs(RuntimeTrace.InboundConnections) do pcall(function() connection:Disconnect() end) end
+    RuntimeTrace.InboundConnections = {}
+    for _, remote in ipairs(collectRemoteTargets("FULL")) do
+        if remote:IsA("RemoteEvent") or remote:IsA("UnreliableRemoteEvent") then
+            local ok, connection = pcall(function()
+                return remote.OnClientEvent:Connect(function(...)
+                    if RuntimeTrace.Enabled then pushRuntimeTrace("IN", remote, "OnClientEvent", table.pack(...), nil) end
+                end)
+            end)
+            if ok and connection then table.insert(RuntimeTrace.InboundConnections, connection) end
+        end
+    end
+end
+
+local function saveRuntimeTrace()
+    safeMakeDir(rootDirectory)
+    local payload = {
+        PlaceId = placeId,
+        GameId = gameId,
+        JobId = jobId,
+        StartedAt = RuntimeTrace.StartedAt,
+        StoppedAt = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+        EventCount = #RuntimeTrace.Events,
+        Dropped = RuntimeTrace.Dropped,
+        Events = RuntimeTrace.Events
+    }
+    local ok, encoded = pcall(HttpService.JSONEncode, HttpService, payload)
+    if ok then return writeText(string.format("%s/_REMOTE_TRACE.json", rootDirectory), encoded) end
+    return false, "TRACE_JSON_FAILED"
+end
+
+local function startRuntimeCapture()
+    local ok, err = installNamecallTrace()
+    if not ok then return false, err end
+    RuntimeTrace.Events = {}
+    RuntimeTrace.Dropped = 0
+    RuntimeTrace.StartedAt = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    RuntimeTrace.Enabled = true
+    attachInboundTrace()
+    return true
+end
+
+local function stopRuntimeCapture()
+    RuntimeTrace.Enabled = false
+    for _, connection in ipairs(RuntimeTrace.InboundConnections) do pcall(function() connection:Disconnect() end) end
+    RuntimeTrace.InboundConnections = {}
+    return saveRuntimeTrace()
 end
 
 collectTargets = function()
@@ -2565,7 +2984,8 @@ local function executeAudit(overrideMode)
 
     setBusyState(false)
     if not ok then
-        percentLabel.Text = "CHECK FAILED (ERROR LOGGED)"
+        logFailure("executeAudit", err)
+        percentLabel.Text = "CHECK FAILED | _ERROR_LOG.txt"
     end
 end
 
@@ -2589,6 +3009,8 @@ local function executeDumpInternal(mode)
         return
     end
 
+    local masterChunks = {}
+    local usedOutputPaths = {}
     local manifestData = {
         GameTitle = placeTitle,
         PlaceId = placeId,
@@ -2611,7 +3033,7 @@ PLACE_VERSION  = %d
 TOTAL_SCRIPTS  = %d
 DUMP_TIME      = %s
 ]=], quoteString(placeTitle), placeId, gameId, quoteString(jobId), placeVersion, total, quoteString(os.date("!%Y-%m-%dT%H:%M:%SZ")))
-        writeText(masterFilePath, masterHeader)
+        table.insert(masterChunks, masterHeader)
     end
 
     for idx, entry in ipairs(targetsToDump) do
@@ -2648,7 +3070,14 @@ DUMP_TIME      = %s
             ThreatScore = entry.Threat and entry.Threat.Score or 0,
             ThreatLevel = entry.Threat and entry.Threat.Level or "UNSCANNED",
             ThreatConfidence = entry.Threat and entry.Threat.Confidence or "NONE",
-            AnalysisComplete = entry.Threat and entry.Threat.AnalysisComplete or false
+            AnalysisComplete = entry.Threat and entry.Threat.AnalysisComplete or false,
+            BytecodeLength = ScriptArtifacts[inst] and ScriptArtifacts[inst].BytecodeLength or 0,
+            BytecodeHash = ScriptArtifacts[inst] and ScriptArtifacts[inst].BytecodeHash or "UNAVAILABLE",
+            Metadata = entry.Metadata or getInstanceMetadata(inst),
+            Extraction = {
+                Attempts = ScriptArtifacts[inst] and ScriptArtifacts[inst].Attempts or {},
+                ClosureAvailable = ScriptArtifacts[inst] and ScriptArtifacts[inst].ClosureAvailable or false
+            }
         }
         table.insert(manifestData.Manifest, manifestEntry)
 
@@ -2659,16 +3088,20 @@ DUMP_TIME      = %s
             end
             safeMakeDir(folderPath)
 
-            local filePath = folderPath .. "/" .. cleanString(inst.Name) .. ".luau"
-            local counter = 1
-            while fileExists(filePath) do
-                filePath = folderPath .. "/" .. cleanString(inst.Name) .. "_" .. counter .. ".luau"
-                counter = counter + 1
+            local baseName = cleanString(inst.Name)
+            local filePath = folderPath .. "/" .. baseName .. ".luau"
+            if usedOutputPaths[filePath] then
+                filePath = folderPath .. "/" .. baseName .. "_" .. computeHash(entry.CanonicalId) .. ".luau"
             end
+            usedOutputPaths[filePath] = true
 
             local fileHeader = makeFileHeader(entry, code)
             local fullOutput = fileHeader .. "\n" .. code .. "\nDATA_END\n"
             writeText(filePath, fullOutput)
+            local artifacts = ScriptArtifacts[inst]
+            if artifacts and type(artifacts.Bytecode) == "string" and #artifacts.Bytecode > 0 then
+                writeText(filePath:gsub("%.luau$", ".bytecode"), artifacts.Bytecode)
+            end
         end
 
         if mode == "SINGLE" or mode == "BOTH" then
@@ -2690,7 +3123,7 @@ DATA_BEGIN
 %s
 DATA_END
 ]=], idx, quoteString(inst.Name), quoteString(getClassName(inst)), quoteString(entry.FullPath), quoteString(entry.CanonicalId), quoteString(entry.Origin), quoteString(method), quoteString(manifestEntry.ThreatLevel), manifestEntry.SourceLength, quoteString(manifestEntry.Hash), wrappedSource)
-            appendText(masterFilePath, chunk)
+            table.insert(masterChunks, chunk)
         end
 
         local ratio = idx / total
@@ -2702,12 +3135,17 @@ DATA_END
         end
     end
 
+    if #masterChunks > 0 then
+        writeText(masterFilePath, table.concat(masterChunks, "\n"))
+    end
     local okJson, encodedManifest = pcall(HttpService.JSONEncode, HttpService, manifestData)
     if okJson then
         writeText(manifestFilePath, encodedManifest)
     end
-
-    percentLabel.Text = string.format("DUMP COMPLETE | SAVED TO: %s", rootDirectory)
+    exportCapabilities()
+    exportRemoteMap(AppState.ScanMode == "TARGETED" and "SMART" or AppState.ScanMode)
+    local runtimeClosureCount = exportRuntimeClosures(AppState.ScanMode == "TARGETED" and "SMART" or AppState.ScanMode)
+    percentLabel.Text = string.format("DUMP COMPLETE | %d RUNTIME CLOSURES | %s", runtimeClosureCount, rootDirectory)
 end
 
 local function executeDump(mode)
@@ -2722,7 +3160,8 @@ local function executeDump(mode)
 
     setBusyState(false)
     if not ok then
-        percentLabel.Text = "DUMP FAILED (ERROR LOGGED)"
+        logFailure("executeDump", err)
+        percentLabel.Text = "DUMP FAILED | _ERROR_LOG.txt"
     end
 end
 
@@ -2733,7 +3172,7 @@ local function showFullGameConfirmation()
     end
 
     modalTitle.Text = "FULL GAME DUMP CONFIRMATION"
-    modalBodyText.Text = "WARNING: FULL GAME mode scans and dumps all accessible game scripts across the entire DataModel (excluding internal Roblox Core packages and player character models).\n\nScope: ALL_ACCESSIBLE_AUDIT_DESCENDANTS\nOn larger game worlds, this operation takes significantly longer.\n\nProceed with full scan?"
+    modalBodyText.Text = "WARNING: FULL GAME mode scans every accessible LocalScript and ModuleScript in the DataModel, loaded modules, nil instances, remotes, runtime closures and available bytecode metadata.\n\nScope: AGGRESSIVE_FULL_RUNTIME\nThis can produce a large dump on bigger games.\n\nProceed with full scan?"
     modalActionBtn.Text = "START FULL SCAN"
     modalActionBtn.Visible = true
 
@@ -2993,13 +3432,36 @@ local function runDeepDiffScan()
 
     setBusyState(false)
     if not ok then
-        percentLabel.Text = "DIFF SCAN FAILED (ERROR LOGGED)"
+        logFailure("runDeepDiffScan", err)
+        percentLabel.Text = "DIFF SCAN FAILED | _ERROR_LOG.txt"
     end
 end
 
 createTopPill("HISTORY", 0, 68, showHistoryModal)
 createTopPill("DIFF SCAN", 74, 76, function()
     task.spawn(runDeepDiffScan)
+end)
+local capturePill
+capturePill = createTopPill("CAPTURE", 156, 64, function()
+    if RuntimeTrace.Enabled then
+        local ok, err = stopRuntimeCapture()
+        if ok then
+            capturePill.Text = "CAPTURE"
+            percentLabel.Text = string.format("TRACE SAVED | %d EVENTS", #RuntimeTrace.Events)
+        else
+            capturePill.Text = "CAP ERR"
+            logFailure("stopRuntimeCapture", err)
+        end
+    else
+        local ok, err = startRuntimeCapture()
+        if ok then
+            capturePill.Text = "STOP CAP"
+            percentLabel.Text = "RUNTIME CAPTURE ACTIVE"
+        else
+            capturePill.Text = "NO HOOK"
+            percentLabel.Text = tostring(err)
+        end
+    end
 end)
 
 makeActionBtn("Dump All", "Split large scripts", 0, 150, function()
@@ -3026,4 +3488,5 @@ makeActionBtn("Refresh", "Reload all scripts", 637, 175, function()
     collectTargets()
 end)
 
+exportCapabilities()
 collectTargets()
