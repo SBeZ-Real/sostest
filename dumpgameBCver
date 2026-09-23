@@ -1,42 +1,41 @@
-local genv = getgenv and getgenv() or _G
+local env = getgenv and getgenv() or _G
 
-if genv.AnyDumper and type(genv.AnyDumper.Destroy) == "function" then
-    pcall(genv.AnyDumper.Destroy)
+if type(env.AnyDumper) == "table" and type(env.AnyDumper.Destroy) == "function" then
+    pcall(env.AnyDumper.Destroy)
 end
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ReplicatedFirst = game:GetService("ReplicatedFirst")
 local Workspace = game:GetService("Workspace")
-local StarterGui = game:GetService("StarterGui")
 local StarterPlayer = game:GetService("StarterPlayer")
+local StarterGui = game:GetService("StarterGui")
 local StarterPack = game:GetService("StarterPack")
 local Lighting = game:GetService("Lighting")
 local SoundService = game:GetService("SoundService")
-local TextChatService = game:GetService("TextChatService")
-local MarketplaceService = game:GetService("MarketplaceService")
-local HttpService = game:GetService("HttpService")
 local CoreGui = game:GetService("CoreGui")
+local HttpService = game:GetService("HttpService")
+local MarketplaceService = game:GetService("MarketplaceService")
 local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
 
 local function global(name)
-    local ok, value = pcall(function()
-        return genv[name]
+    local value
+    pcall(function()
+        value = env[name]
     end)
-    if ok and value ~= nil then
+    if value ~= nil then
         return value
     end
-    local ok2, value2 = pcall(function()
-        return _G[name]
+    pcall(function()
+        value = _G[name]
     end)
-    if ok2 then
-        return value2
-    end
+    return value
 end
 
-local capNames = {
+local names = {
     "writefile",
     "readfile",
     "makefolder",
@@ -44,26 +43,50 @@ local capNames = {
     "isfile",
     "decompile",
     "getscriptbytecode",
+    "getscripts",
+    "getinstances",
     "getloadedmodules",
-    "getnilinstances",
     "getgc",
-    "getfenv",
+    "getnilinstances",
     "getsenv",
+    "getfenv",
     "getscriptclosure",
     "getscriptfunction",
-    "getconstants",
     "getupvalues",
+    "getconstants",
+    "getconnections",
     "isexecutorclosure",
     "isourclosure",
-    "getconnections",
     "setclipboard",
     "gethui",
     "identifyexecutor",
-    "getexecutorname"
+    "getexecutorname",
+    "appendfile",
+    "listfiles",
+    "delfile",
+    "delfolder",
+    "getreg",
+    "getrenv",
+    "getprotos",
+    "getproto",
+    "getstack",
+    "setstack",
+    "islclosure",
+    "iscclosure",
+    "clonefunction",
+    "getrunningscripts",
+    "getcallingscript",
+    "getscriptfromthread",
+    "getscripthash",
+    "getactors",
+    "getactorthreads",
+    "getactorfromthread",
+    "run_on_actor",
+    "getcurrentactor"
 }
 
 local caps = {}
-for _, name in ipairs(capNames) do
+for _, name in ipairs(names) do
     caps[name] = type(global(name)) == "function"
 end
 caps.debugInfo = type(debug) == "table" and type(debug.info) == "function"
@@ -75,120 +98,133 @@ local isfolderFn = global("isfolder")
 local isfileFn = global("isfile")
 local decompileFn = global("decompile")
 local bytecodeFn = global("getscriptbytecode")
+local getscriptsFn = global("getscripts")
+local getinstancesFn = global("getinstances")
 local getloadedmodulesFn = global("getloadedmodules")
-local getnilinstancesFn = global("getnilinstances")
 local getgcFn = global("getgc")
-local getfenvFn = global("getfenv")
+local getnilinstancesFn = global("getnilinstances")
 local getsenvFn = global("getsenv")
+local getfenvFn = global("getfenv")
 local getscriptclosureFn = global("getscriptclosure")
 local getscriptfunctionFn = global("getscriptfunction")
-local getconstantsFn = global("getconstants")
 local getupvaluesFn = global("getupvalues")
+local getconstantsFn = global("getconstants")
+local getconnectionsFn = global("getconnections")
 local isexecutorclosureFn = global("isexecutorclosure")
 local isourclosureFn = global("isourclosure")
-local getconnectionsFn = global("getconnections")
 local setclipboardFn = global("setclipboard")
 local gethuiFn = global("gethui")
 local identifyexecutorFn = global("identifyexecutor")
 local getexecutornameFn = global("getexecutorname")
 
+local DEFAULT_WORKERS = 6
+local DECOMPILE_TIMEOUT = 12
+local MAX_RUNTIME_FUNCTIONS = 20000
+local MAX_DEEP_RUNTIME_FUNCTIONS = 45000
+local MAX_RUNTIME_TABLES = 3000
+local MAX_RUNTIME_KEYS = 48
+local MAX_NETWORK_EVENTS = 2500
+
+local preferences = type(env.AnyDumper_Preferences) == "table" and env.AnyDumper_Preferences or {}
+env.AnyDumper_Preferences = preferences
+
+local timings = {Capabilities = 0, Scan = 0, Code = 0, Remotes = 0, Runtime = 0, Actors = 0, Network = 0, Write = 0}
+
 local state = {
     Running = false,
-    Scanning = false,
     Cancelled = false,
+    Scanning = false,
+    Scanned = false,
     Phase = "READY",
-    Mode = "Balanced",
-    BaseRoot = "",
+    Mode = preferences.Mode or "Balanced",
+    Root = "",
     RunRoot = "",
-    Game = game.Name,
-    PlaceId = game.PlaceId,
-    Code = 0,
+    StartedAt = 0,
+    FinishedAt = 0,
+    Scripts = 0,
     Remotes = 0,
     Runtime = 0,
     Failed = 0,
-    StartedAt = 0,
-    FinishedAt = 0,
-    LastError = nil,
-    ScanReady = false
+    Processed = 0,
+    Total = 0,
+    GameName = game.Name,
+    PlaceId = game.PlaceId,
+    Message = "Choose roots, then scan structure"
 }
 
 local options = {
-    Remotes = true,
-    RuntimeLinked = true,
-    Bytecode = false,
-    FullDump = false,
-    LinkedNil = false
+    Remotes = preferences.Remotes ~= false,
+    Runtime = preferences.Runtime ~= false,
+    BytecodeFailed = preferences.BytecodeFailed ~= false,
+    FullDump = preferences.FullDump == true,
+    LinkedNil = preferences.LinkedNil == true,
+    NetworkTrace = preferences.NetworkTrace == true,
+    ActorScan = preferences.ActorScan ~= false
 }
 
+local rootDescriptors = {}
+local rootByKey = {}
+local scanCache = {
+    Scripts = {},
+    Remotes = {},
+    Counts = {},
+    Rejected = {}
+}
+
+local ui = {}
 local errors = {}
-local codeIndex = {}
-local remoteIndex = {}
-local runtimeIndex = {Modules = {}, Functions = {}, Tables = {}, NilInstances = {}}
-local fullDumpEntries = {}
+local indexRows = {}
+local remoteRows = {}
+local runtimeRows = {Modules = {}, Functions = {}, Tables = {}, NilInstances = {}}
+local fullDumpRows = {}
+local actorRows = {}
+local networkRows = {}
+local networkSummary = {Receive = 0, Send = 0, Dropped = 0, StartedAt = nil, StoppedAt = nil}
+local rejected = {}
+local Capability = {}
+local Network = {}
+local Actor = {}
+local capProfile = {Executor = "Unknown", Functions = {}, Categories = {}, Standards = {}, RakNet = {}, Actors = {}, Vulns = {}, Summary = {Verified = 0, Present = 0, Failed = 0, Skipped = 0, Total = 0}, CheckedAt = nil}
+local capabilityBusy = false
 local usedPaths = {}
 local acceptedScripts = {}
 local acceptedInstances = {}
 local acceptedFunctions = {}
 local linkedTables = {}
-local linkedNilInstances = {}
-local filterStats = {}
-local ui = {}
-local scanCache = {}
+local linkedNil = {}
 
 local function safeString(value)
     local ok, result = pcall(tostring, value)
     return ok and result or "<unprintable>"
 end
 
-local function shortHash(text)
-    local hash = 5381
-    for i = 1, #text do
-        hash = (hash * 33 + string.byte(text, i)) % 4294967296
-    end
-    return string.format("%08x", hash)
-end
-
-local reserved = {
-    CON = true,
-    PRN = true,
-    AUX = true,
-    NUL = true,
-    COM1 = true,
-    COM2 = true,
-    COM3 = true,
-    COM4 = true,
-    COM5 = true,
-    COM6 = true,
-    COM7 = true,
-    COM8 = true,
-    COM9 = true,
-    LPT1 = true,
-    LPT2 = true,
-    LPT3 = true,
-    LPT4 = true,
-    LPT5 = true,
-    LPT6 = true,
-    LPT7 = true,
-    LPT8 = true,
-    LPT9 = true
-}
-
 local function sanitize(value)
     local s = safeString(value)
     s = s:gsub("[%z\1-\31]", "_")
     s = s:gsub("[<>:\"/\\|%?%*]", "_")
     s = s:gsub("^%s+", "")
-    s = s:gsub("[%s%.]+$", "")
+    s = s:gsub("%s+$", "")
+    s = s:gsub("[%. ]+$", "")
     if s == "" then
         s = "unnamed"
     end
-    if reserved[string.upper(s)] then
-        s = s .. "_"
-    end
-    if #s > 80 then
-        s = s:sub(1, 62) .. "_" .. shortHash(s)
+    if #s > 72 then
+        local hash = 5381
+        for i = 1, #s do
+            hash = (hash * 33 + string.byte(s, i)) % 4294967296
+        end
+        s = s:sub(1, 56) .. "_" .. string.format("%08x", hash)
     end
     return s
+end
+
+local function hashText(text)
+    local hash = 2166136261
+    for i = 1, #text do
+        hash = bit32.bxor(hash, string.byte(text, i))
+        hash = (hash * 16777619) % 4294967296
+    end
+    return string.format("%08x", hash)
 end
 
 local function luaQuote(value)
@@ -196,7 +232,7 @@ local function luaQuote(value)
 end
 
 local function longQuote(text)
-    local content = safeString(text or "")
+    local content = tostring(text or "")
     for level = 0, 12 do
         local eq = string.rep("=", level)
         local close = "]" .. eq .. "]"
@@ -245,13 +281,13 @@ local function serialize(value, depth, seen)
             parts[#parts + 1] = "[\"__TRUNCATED\"]=true,"
             break
         end
-        local keyText
+        local encodedKey
         if type(key) == "string" and key:match("^[%a_][%w_]*$") then
-            keyText = key
+            encodedKey = key
         else
-            keyText = "[" .. serialize(key, depth + 1, seen) .. "]"
+            encodedKey = "[" .. serialize(key, depth + 1, seen) .. "]"
         end
-        parts[#parts + 1] = keyText .. "=" .. serialize(child, depth + 1, seen) .. ","
+        parts[#parts + 1] = encodedKey .. "=" .. serialize(child, depth + 1, seen) .. ","
     end
     parts[#parts + 1] = "}"
     seen[value] = nil
@@ -296,6 +332,36 @@ local function jsonSafe(value, depth, seen)
     return out
 end
 
+local function recordReject(reason)
+    local key = safeString(reason or "Unknown")
+    rejected[key] = (rejected[key] or 0) + 1
+end
+
+local function recordError(scope, target, err)
+    errors[#errors + 1] = {
+        Scope = safeString(scope),
+        Target = safeString(target),
+        Error = safeString(err)
+    }
+    state.Failed = state.Failed + 1
+end
+
+local function safeFullName(instance)
+    local result = safeString(instance)
+    pcall(function()
+        result = instance:GetFullName()
+    end)
+    return result
+end
+
+local function safeClass(instance)
+    local result = "Unknown"
+    pcall(function()
+        result = instance.ClassName
+    end)
+    return result
+end
+
 local function safeParent(instance)
     local parent
     pcall(function()
@@ -304,22 +370,7 @@ local function safeParent(instance)
     return parent
 end
 
-local function safeClass(instance)
-    local class = "Unknown"
-    pcall(function()
-        class = instance.ClassName
-    end)
-    return class
-end
-
-local function safeFullName(instance)
-    local ok, result = pcall(function()
-        return instance:GetFullName()
-    end)
-    return ok and result or safeString(instance)
-end
-
-local function isLua(instance)
+local function isLuaContainer(instance)
     local ok, result = pcall(function()
         return instance:IsA("LuaSourceContainer")
     end)
@@ -335,7 +386,7 @@ local function isRemote(instance)
     return class == "RemoteEvent" or class == "RemoteFunction" or class == "UnreliableRemoteEvent"
 end
 
-local function isDescendant(instance, ancestor)
+local function descendant(instance, ancestor)
     if not instance or not ancestor then
         return false
     end
@@ -345,221 +396,87 @@ local function isDescendant(instance, ancestor)
     return ok and result == true
 end
 
-local defaultNames = {
-    PlayerModule = true,
-    PlayerScriptsLoader = true,
-    RbxCharacterSounds = true,
-    BubbleChat = true,
-    ChatScript = true,
-    ExperienceChat = true,
-    CharacterSoundEvent = true,
-    SoundDispatcher = true,
-    CameraModule = true,
-    ControlModule = true
-}
-
-local coreSourceHints = {
-    "corepackages",
-    "coregui",
-    "robloxgui",
-    "robloxreplicatedstorage",
-    "playerscriptsloader",
-    "playermodule.cameramodule",
-    "playermodule.controlmodule",
-    "rbxcharactersounds",
-    "experiencechat"
-}
-
-local executorSourceHints = {
-    "anydumper",
-    "synapse",
-    "scriptware",
-    "script-ware",
-    "fluxus",
-    "krnl",
-    "solara",
-    "wave",
-    "codex",
-    "xeno",
-    "electron",
-    "arceus",
-    "deltaexecutor"
-}
-
-local function sourceRejected(source)
-    local lower = string.lower(safeString(source or ""))
-    for _, hint in ipairs(coreSourceHints) do
-        if lower:find(hint, 1, true) then
-            return true, "CoreSource"
-        end
-    end
-    for _, hint in ipairs(executorSourceHints) do
-        if lower:find(hint, 1, true) then
-            return true, "ExecutorSource"
-        end
-    end
-    return false
-end
-
-local function belongsToAnyCharacter(instance)
+local function otherPlayerCharacter(instance)
     for _, player in ipairs(Players:GetPlayers()) do
         local character
         pcall(function()
             character = player.Character
         end)
-        if character and isDescendant(instance, character) then
-            return player, character
+        if character and descendant(instance, character) then
+            if player ~= LocalPlayer then
+                return true
+            end
+            return false, true
         end
+    end
+    return false, false
+end
+
+local blockedPlayerRoots = {
+    PlayerModule = true,
+    PlayerScriptsLoader = true,
+    RbxCharacterSounds = true,
+    BubbleChat = true,
+    ChatScript = true,
+    ExperienceChat = true
+}
+
+local function topInside(instance, root)
+    local cursor = instance
+    local previous = instance
+    local guard = 0
+    while cursor and cursor ~= root and guard < 100 do
+        previous = cursor
+        cursor = safeParent(cursor)
+        guard = guard + 1
+    end
+    if cursor == root then
+        return previous
     end
 end
 
-local function isDefaultLocalObject(instance)
-    if not LocalPlayer then
+local function isKnownRobloxDefault(instance, descriptor)
+    if descriptor.Group ~= "Local Player" and descriptor.Key ~= "StarterPlayer" and descriptor.Key ~= "StarterGui" then
         return false
     end
     local cursor = instance
     local guard = 0
-    while cursor and guard < 80 do
-        local parent = safeParent(cursor)
-        if parent == LocalPlayer then
-            break
-        end
-        local name = safeString(cursor.Name)
-        if defaultNames[name] then
+    while cursor and cursor ~= descriptor.Instance and guard < 100 do
+        if blockedPlayerRoots[safeString(cursor.Name)] then
             return true
         end
-        cursor = parent
+        cursor = safeParent(cursor)
         guard = guard + 1
     end
     return false
 end
 
-local function recordError(scope, target, err)
-    local row = {
-        Scope = safeString(scope or "UNKNOWN"),
-        Target = safeString(target or "UNKNOWN"),
-        Error = safeString(err or "UNKNOWN")
-    }
-    errors[#errors + 1] = row
-    state.Failed = state.Failed + 1
-    state.LastError = row
-end
-
-local function resetFilterStats()
-    filterStats = {
-        ScriptsDiscovered = 0,
-        ScriptsAccepted = 0,
-        RemotesDiscovered = 0,
-        RemotesAccepted = 0,
-        RuntimeFunctionsScanned = 0,
-        RuntimeFunctionsAccepted = 0,
-        RuntimeTablesScanned = 0,
-        RuntimeTablesAccepted = 0,
-        ModulesDiscovered = 0,
-        ModulesAccepted = 0,
-        NilDiscovered = 0,
-        NilAccepted = 0,
-        Rejected = {}
-    }
-end
-
-local function reject(reason)
-    filterStats.Rejected[reason] = (filterStats.Rejected[reason] or 0) + 1
-end
-
-local function ensureFolder(path)
-    if not caps.makefolder then
-        return false, "makefolder unavailable"
+local function instanceAllowed(instance, descriptor)
+    if not instance or not descriptor or not descriptor.Instance then
+        return false, "InvalidRoot"
     end
-    local current = ""
-    for segment in string.gmatch(path, "[^/]+") do
-        current = current == "" and segment or current .. "/" .. segment
-        local exists = false
-        if caps.isfolder then
-            local ok, result = pcall(isfolderFn, current)
-            exists = ok and result == true
+    if safeClass(instance) == "CoreScript" then
+        return false, "CoreScript"
+    end
+    if instance ~= descriptor.Instance and not descendant(instance, descriptor.Instance) then
+        return false, "OutsideSelectedRoot"
+    end
+    if descendant(instance, CoreGui) then
+        return false, "CoreGui"
+    end
+    if descriptor.Key == "Workspace" then
+        local other, localCharacter = otherPlayerCharacter(instance)
+        if other then
+            return false, "OtherPlayerCharacter"
         end
-        if not exists then
-            local ok, err = pcall(makefolderFn, current)
-            if not ok and caps.isfolder then
-                local ok2, exists2 = pcall(isfolderFn, current)
-                if not ok2 or not exists2 then
-                    return false, safeString(err)
-                end
-            end
+        if localCharacter then
+            return false, "LocalCharacterSeparateRoot"
         end
     end
-    return true
-end
-
-local function parentFolder(path)
-    return path:match("^(.*)/[^/]+$")
-end
-
-local function uniquePath(path)
-    if not usedPaths[path] then
-        usedPaths[path] = true
-        return path
+    if isKnownRobloxDefault(instance, descriptor) then
+        return false, "RobloxDefaultPlayer"
     end
-    local base, ext = path:match("^(.*)(%.[^%./]+)$")
-    base = base or path
-    ext = ext or ""
-    local index = 2
-    local candidate = base .. "_" .. tostring(index) .. ext
-    while usedPaths[candidate] do
-        index = index + 1
-        candidate = base .. "_" .. tostring(index) .. ext
-    end
-    usedPaths[candidate] = true
-    return candidate
-end
-
-local function writeVerified(path, data)
-    if not caps.writefile then
-        return false, "writefile unavailable"
-    end
-    local folder = parentFolder(path)
-    if folder then
-        local okFolder, folderErr = ensureFolder(folder)
-        if not okFolder then
-            return false, folderErr
-        end
-    end
-    local okWrite, writeErr = pcall(writefileFn, path, data)
-    if not okWrite then
-        return false, safeString(writeErr)
-    end
-    if caps.readfile then
-        local okRead, readBack = pcall(readfileFn, path)
-        if not okRead then
-            return false, "verify read failed: " .. safeString(readBack)
-        end
-        if readBack ~= data then
-            return false, "verify content mismatch"
-        end
-    elseif caps.isfile then
-        local okFile, exists = pcall(isfileFn, path)
-        if not okFile or not exists then
-            return false, "verify file missing"
-        end
-    end
-    return true
-end
-
-local function getExecutorName()
-    if identifyexecutorFn then
-        local ok, a, b = pcall(identifyexecutorFn)
-        if ok then
-            return b and safeString(a) .. " " .. safeString(b) or safeString(a)
-        end
-    end
-    if getexecutornameFn then
-        local ok, result = pcall(getexecutornameFn)
-        if ok then
-            return safeString(result)
-        end
-    end
-    return "Unknown"
+    return true, "SelectedRoot"
 end
 
 local function getGameName()
@@ -573,43 +490,498 @@ local function getGameName()
     return name
 end
 
-local function runStamp()
+local function executorName()
+    if identifyexecutorFn then
+        local ok, a, b = pcall(identifyexecutorFn)
+        if ok then
+            return b and (safeString(a) .. " " .. safeString(b)) or safeString(a)
+        end
+    end
+    if getexecutornameFn then
+        local ok, result = pcall(getexecutornameFn)
+        if ok then
+            return safeString(result)
+        end
+    end
+    return "Unknown"
+end
+
+
+function Capability.best(list)
+    local rank = {SKIPPED = 0, FAILED = 1, PRESENT = 2, VERIFIED = 3}
+    local best = "SKIPPED"
+    for _, name in ipairs(list) do
+        local row = capProfile.Functions[name]
+        if row and (rank[row.Status] or 0) > (rank[best] or 0) then
+            best = row.Status
+        end
+    end
+    return best
+end
+
+function Capability.good(name)
+    local row = capProfile.Functions[name]
+    return row and (row.Status == "VERIFIED" or row.Status == "PRESENT")
+end
+
+function Capability.verified(name)
+    local row = capProfile.Functions[name]
+    return row and row.Status == "VERIFIED"
+end
+
+function Capability.raknetFunction(name)
+    local lib = global("raknet") or global("RakNet")
+    if type(lib) ~= "table" then return nil end
+    local value
+    pcall(function() value = lib[name] end)
+    return type(value) == "function" and value or nil
+end
+
+function Capability.run()
+    if capabilityBusy then return capProfile end
+    capabilityBusy = true
+    local started = os.clock()
+    capProfile = {Executor = executorName(), Functions = {}, Categories = {}, Standards = {}, RakNet = {}, Actors = {}, Vulns = {}, Summary = {Verified = 0, Present = 0, Failed = 0, Skipped = 0, Total = 0}, CheckedAt = os.time()}
+
+    local function set(name, status, detail, category)
+        capProfile.Functions[name] = {Status = status, Detail = detail and safeString(detail) or nil, Category = category or "Other"}
+    end
+
+    local function present(name, category)
+        if type(global(name)) == "function" then
+            set(name, "PRESENT", nil, category)
+            return true
+        end
+        set(name, "SKIPPED", "missing", category)
+        return false
+    end
+
+    local function verify(name, fn, validator, category)
+        if type(fn) ~= "function" then
+            set(name, "SKIPPED", "missing", category)
+            return false
+        end
+        local ok, value = pcall(fn)
+        if not ok then
+            set(name, "FAILED", value, category)
+            return false
+        end
+        local valid, detail = true, nil
+        if validator then
+            local okV, result, reason = pcall(validator, value)
+            valid = okV and result == true
+            detail = okV and reason or result
+        end
+        set(name, valid and "VERIFIED" or "FAILED", detail, category)
+        return valid, value
+    end
+
+    local function verifyTable(name, fn, category, caller)
+        if type(fn) ~= "function" then
+            set(name, "SKIPPED", "missing", category)
+            return false
+        end
+        return verify(name, caller or fn, function(value) return type(value) == "table", type(value) end, category)
+    end
+
+    local function timed(seconds, fn)
+        local done, okResult, result = false, false, nil
+        local thread = task.spawn(function()
+            okResult, result = pcall(fn)
+            done = true
+        end)
+        local begin = os.clock()
+        while not done do
+            if os.clock() - begin >= seconds then
+                pcall(function() task.cancel(thread) end)
+                return false, "timeout"
+            end
+            task.wait(0.03)
+        end
+        return okResult, result
+    end
+
+    local function probeScript()
+        local roots = {ReplicatedStorage, ReplicatedFirst, StarterPlayer, StarterGui, StarterPack}
+        if LocalPlayer then
+            local a = LocalPlayer:FindFirstChild("PlayerScripts")
+            local b = LocalPlayer:FindFirstChild("PlayerGui")
+            if a then roots[#roots + 1] = a end
+            if b then roots[#roots + 1] = b end
+        end
+        for _, root in ipairs(roots) do
+            local ok, list = pcall(function() return root:GetDescendants() end)
+            if ok then
+                for _, instance in ipairs(list) do
+                    if isLuaContainer(instance) and safeClass(instance) ~= "CoreScript" then return instance end
+                end
+            end
+        end
+    end
+
+    local makefolder = global("makefolder")
+    local isfolder = global("isfolder")
+    local writefile = global("writefile")
+    local readfile = global("readfile")
+    local appendfile = global("appendfile")
+    local isfile = global("isfile")
+    local listfiles = global("listfiles")
+    local delfile = global("delfile")
+    local delfolder = global("delfolder")
+    local folder = "any_dumper_probe_" .. tostring(math.floor(os.clock() * 100000))
+    local file = folder .. "/probe.txt"
+    if makefolder then
+        local ok, err = pcall(makefolder, folder)
+        set("makefolder", ok and "VERIFIED" or "FAILED", err, "Filesystem")
+    else set("makefolder", "SKIPPED", "missing", "Filesystem") end
+    if writefile then
+        local payload = "any-dumper-capability"
+        local ok, err = pcall(writefile, file, payload)
+        set("writefile", ok and "VERIFIED" or "FAILED", err, "Filesystem")
+        if ok and readfile then
+            local okR, data = pcall(readfile, file)
+            set("readfile", okR and data == payload and "VERIFIED" or "FAILED", okR and tostring(#tostring(data)) or data, "Filesystem")
+        else set("readfile", readfile and "PRESENT" or "SKIPPED", nil, "Filesystem") end
+        if ok and appendfile then
+            local okA, errA = pcall(appendfile, file, "+")
+            set("appendfile", okA and "VERIFIED" or "FAILED", errA, "Filesystem")
+        else set("appendfile", appendfile and "PRESENT" or "SKIPPED", nil, "Filesystem") end
+        if isfile then
+            local okF, exists = pcall(isfile, file)
+            set("isfile", okF and exists and "VERIFIED" or "FAILED", okF and tostring(exists) or exists, "Filesystem")
+        else set("isfile", "SKIPPED", "missing", "Filesystem") end
+        if listfiles then
+            local okL, list = pcall(listfiles, folder)
+            set("listfiles", okL and type(list) == "table" and "VERIFIED" or "FAILED", okL and type(list) or list, "Filesystem")
+        else set("listfiles", "SKIPPED", "missing", "Filesystem") end
+    else
+        set("writefile", "SKIPPED", "missing", "Filesystem")
+        set("readfile", readfile and "PRESENT" or "SKIPPED", nil, "Filesystem")
+        set("appendfile", appendfile and "PRESENT" or "SKIPPED", nil, "Filesystem")
+        set("isfile", isfile and "PRESENT" or "SKIPPED", nil, "Filesystem")
+        set("listfiles", listfiles and "PRESENT" or "SKIPPED", nil, "Filesystem")
+    end
+    if isfolder then
+        local okF, exists = pcall(isfolder, folder)
+        set("isfolder", okF and exists and "VERIFIED" or "FAILED", okF and tostring(exists) or exists, "Filesystem")
+    else set("isfolder", "SKIPPED", "missing", "Filesystem") end
+    if delfile then
+        local okD, errD = pcall(delfile, file)
+        set("delfile", okD and "VERIFIED" or "FAILED", errD, "Filesystem")
+    else set("delfile", "SKIPPED", "missing", "Filesystem") end
+    if delfolder then
+        local okD, errD = pcall(delfolder, folder)
+        set("delfolder", okD and "VERIFIED" or "FAILED", errD, "Filesystem")
+    else set("delfolder", "SKIPPED", "missing", "Filesystem") end
+
+    local getscripts = global("getscripts")
+    local getrunningscripts = global("getrunningscripts")
+    local getloadedmodules = global("getloadedmodules")
+    local getinstances = global("getinstances")
+    local getnilinstances = global("getnilinstances")
+    local getgc = global("getgc")
+    local getreg = global("getreg")
+    local getrenv = global("getrenv")
+    verifyTable("getscripts", getscripts, "Scripts")
+    verifyTable("getrunningscripts", getrunningscripts, "Scripts")
+    verifyTable("getloadedmodules", getloadedmodules, "Scripts")
+    verifyTable("getinstances", getinstances, "Instances")
+    verifyTable("getnilinstances", getnilinstances, "Instances")
+    verifyTable("getgc", getgc, "Runtime", getgc and function() return getgc(false) end or nil)
+    verifyTable("getreg", getreg, "Runtime")
+    verifyTable("getrenv", getrenv, "Environment")
+
+    local held = 19
+    local function probeFunction() return held end
+    local getfenv = global("getfenv")
+    local getupvalues = global("getupvalues")
+    local getconstants = global("getconstants")
+    local getprotos = global("getprotos")
+    verifyTable("getfenv", getfenv, "Environment", getfenv and function() return getfenv(probeFunction) end or nil)
+    verifyTable("getupvalues", getupvalues, "Debug", getupvalues and function() return getupvalues(probeFunction) end or nil)
+    verifyTable("getconstants", getconstants, "Debug", getconstants and function() return getconstants(probeFunction) end or nil)
+    verifyTable("getprotos", getprotos, "Debug", getprotos and function() return getprotos(probeFunction) end or nil)
+    if caps.debugInfo then
+        local ok, source = pcall(function() return debug.info(probeFunction, "s") end)
+        set("debug.info", ok and type(source) == "string" and "VERIFIED" or "FAILED", source, "Debug")
+    else set("debug.info", "SKIPPED", "missing", "Debug") end
+
+    for _, closureName in ipairs({"isexecutorclosure", "isourclosure", "islclosure", "iscclosure"}) do
+        local fn = global(closureName)
+        if fn then
+            local target = closureName == "iscclosure" and print or probeFunction
+            local ok, result = pcall(fn, target)
+            set(closureName, ok and type(result) == "boolean" and "VERIFIED" or "FAILED", ok and tostring(result) or result, "Closures")
+        else set(closureName, "SKIPPED", "missing", "Closures") end
+    end
+    local clonefunction = global("clonefunction")
+    if clonefunction then
+        local ok, clone = pcall(clonefunction, probeFunction)
+        set("clonefunction", ok and type(clone) == "function" and "VERIFIED" or "FAILED", ok and type(clone) or clone, "Closures")
+    else set("clonefunction", "SKIPPED", "missing", "Closures") end
+
+    local script = probeScript()
+    local scriptTests = {"getscriptbytecode", "getscriptclosure", "getscriptfunction", "getsenv", "getscripthash", "decompile"}
+    if script then
+        local bytecode = global("getscriptbytecode")
+        if bytecode then
+            local ok, data = pcall(bytecode, script)
+            set("getscriptbytecode", ok and (data == nil or type(data) == "string") and "VERIFIED" or "FAILED", ok and (data and tostring(#data) .. " bytes" or "nil allowed") or data, "Scripts")
+        else set("getscriptbytecode", "SKIPPED", "missing", "Scripts") end
+        for _, name in ipairs({"getscriptclosure", "getscriptfunction"}) do
+            local fn = global(name)
+            if fn then
+                local ok, closure = pcall(fn, script)
+                set(name, ok and (closure == nil or type(closure) == "function") and "VERIFIED" or "FAILED", ok and type(closure) or closure, "Scripts")
+            else set(name, "SKIPPED", "missing", "Scripts") end
+        end
+        local getsenv = global("getsenv")
+        if getsenv then
+            local ok, scriptEnv = pcall(getsenv, script)
+            set("getsenv", ok and type(scriptEnv) == "table" and "VERIFIED" or "FAILED", ok and type(scriptEnv) or scriptEnv, "Environment")
+        else set("getsenv", "SKIPPED", "missing", "Environment") end
+        local getscripthash = global("getscripthash")
+        if getscripthash then
+            local ok, hash = pcall(getscripthash, script)
+            set("getscripthash", ok and type(hash) == "string" and #hash > 0 and "VERIFIED" or "FAILED", ok and hash or hash, "Scripts")
+        else set("getscripthash", "SKIPPED", "missing", "Scripts") end
+        local decompile = global("decompile")
+        if decompile then
+            local ok, result = timed(math.min(6, DECOMPILE_TIMEOUT), function() return decompile(script) end)
+            set("decompile", ok and type(result) == "string" and #result > 0 and "VERIFIED" or "FAILED", ok and (type(result) == "string" and tostring(#result) .. " chars" or type(result)) or result, "Decompiler")
+        else set("decompile", "SKIPPED", "missing", "Decompiler") end
+    else
+        for _, name in ipairs(scriptTests) do
+            set(name, type(global(name)) == "function" and "PRESENT" or "SKIPPED", "no probe script", name == "decompile" and "Decompiler" or "Scripts")
+        end
+    end
+
+    local getactors = global("getactors")
+    if getactors then
+        local ok, actors = pcall(getactors)
+        set("getactors", ok and type(actors) == "table" and "VERIFIED" or "FAILED", ok and (type(actors) == "table" and tostring(#actors) or type(actors)) or actors, "Actors")
+        capProfile.Actors.Count = ok and type(actors) == "table" and #actors or 0
+    else set("getactors", "SKIPPED", "missing", "Actors") end
+    for _, name in ipairs({"getactorthreads", "getactorfromthread", "run_on_actor", "getcurrentactor", "getconnections", "setclipboard", "getstack", "setstack", "getproto", "getcallingscript", "getscriptfromthread"}) do
+        present(name, (name:find("actor") or name == "run_on_actor") and "Actors" or (name:find("stack") or name == "getproto") and "Debug" or name == "getconnections" and "Signals" or "Scripts")
+    end
+
+    local raknet = global("raknet") or global("RakNet")
+    local r = {Namespace = type(raknet) == "table", Enabled = nil, ReceiveHook = "SKIPPED", SendHook = "SKIPPED", OnPacketReceive = false, OnPacketSend = false, Mutation = false}
+    if type(raknet) == "table" then
+        set("raknet", "PRESENT", "namespace", "Network")
+        local function rfn(name)
+            local value
+            pcall(function() value = raknet[name] end)
+            return type(value) == "function" and value or nil
+        end
+        local enabled = rfn("is_enabled")
+        if enabled then
+            local ok, value = pcall(enabled)
+            r.Enabled = ok and value == true or false
+            set("raknet.is_enabled", ok and "VERIFIED" or "FAILED", ok and tostring(value) or value, "Network")
+        else set("raknet.is_enabled", "SKIPPED", "missing", "Network") end
+        for _, pair in ipairs({{"receive", "add_receive_hook", "remove_receive_hook"}, {"send", "add_send_hook", "remove_send_hook"}}) do
+            local add, remove = rfn(pair[2]), rfn(pair[3])
+            if add then
+                local callback = function() end
+                local ok, token = pcall(add, callback)
+                local removed = false
+                if ok and remove then
+                    local okR = pcall(remove, token or callback)
+                    if not okR then okR = pcall(remove, callback) end
+                    removed = okR
+                end
+                local status = ok and (remove and removed and "VERIFIED" or "PRESENT") or "FAILED"
+                set("raknet." .. pair[2], status, ok and (removed and "add/remove" or "add") or token, "Network")
+                r[pair[1] == "receive" and "ReceiveHook" or "SendHook"] = status
+            else set("raknet." .. pair[2], "SKIPPED", "missing", "Network") end
+            set("raknet." .. pair[3], remove and "PRESENT" or "SKIPPED", nil, "Network")
+        end
+        pcall(function()
+            r.OnPacketReceive = raknet.OnPacketReceive ~= nil
+            r.OnPacketSend = raknet.OnPacketSend ~= nil
+            r.Mutation = type(raknet.send) == "function"
+        end)
+        set("raknet.send", type(raknet.send) == "function" and "PRESENT" or "SKIPPED", "detected only", "Network")
+    else
+        set("raknet", "SKIPPED", "namespace missing", "Network")
+    end
+    capProfile.RakNet = r
+
+    capProfile.Vulns = {Mode = "passive", Exposure = {
+        HttpRequest = type(global("request") or global("http_request")) == "function",
+        WebSocket = type(global("WebSocket") or global("websocket")) ~= "nil",
+        FilesystemWrite = type(writefile) == "function",
+        ClipboardWrite = type(global("setclipboard")) == "function",
+        RakNetMutation = type(raknet) == "table" and type(raknet.send) == "function",
+        DebugMutation = type(global("setstack")) == "function",
+        ActorExecution = type(global("run_on_actor")) == "function"
+    }}
+
+    local categories = {
+        Filesystem = {"writefile", "readfile", "appendfile", "makefolder", "isfolder", "isfile", "listfiles", "delfile", "delfolder"},
+        Scripts = {"getscripts", "getrunningscripts", "getloadedmodules", "getscriptbytecode", "getscriptclosure", "getscriptfunction", "getsenv", "getscripthash"},
+        Runtime = {"getgc", "getreg", "getinstances", "getnilinstances"},
+        Debug = {"debug.info", "getconstants", "getupvalues", "getprotos", "getproto", "getstack", "setstack"},
+        Closures = {"isexecutorclosure", "isourclosure", "islclosure", "iscclosure", "clonefunction"},
+        Actors = {"getactors", "getactorthreads", "getactorfromthread", "run_on_actor", "getcurrentactor"},
+        Network = {"raknet", "raknet.is_enabled", "raknet.add_receive_hook", "raknet.add_send_hook", "raknet.remove_receive_hook", "raknet.remove_send_hook", "raknet.send"},
+        Decompiler = {"decompile", "getscriptbytecode"}
+    }
+    for category, members in pairs(categories) do
+        local row = {Verified = 0, Present = 0, Failed = 0, Skipped = 0, Total = #members}
+        for _, name in ipairs(members) do
+            local value = capProfile.Functions[name]
+            local status = value and value.Status or "SKIPPED"
+            row[status == "VERIFIED" and "Verified" or status == "PRESENT" and "Present" or status == "FAILED" and "Failed" or "Skipped"] = row[status == "VERIFIED" and "Verified" or status == "PRESENT" and "Present" or status == "FAILED" and "Failed" or "Skipped"] + 1
+        end
+        capProfile.Categories[category] = row
+    end
+
+    local function standard(members, verifiedOnly)
+        local passed = 0
+        for _, name in ipairs(members) do
+            local row = capProfile.Functions[name]
+            if row and ((verifiedOnly and row.Status == "VERIFIED") or (not verifiedOnly and (row.Status == "VERIFIED" or row.Status == "PRESENT"))) then passed = passed + 1 end
+        end
+        return {Passed = passed, Total = #members}
+    end
+    capProfile.Standards = {
+        UNC = standard({"writefile", "readfile", "makefolder", "isfile", "isfolder", "getscripts", "getloadedmodules", "getgc", "getnilinstances", "getconnections", "getsenv", "getfenv", "getscriptbytecode", "getscriptclosure", "getconstants", "getupvalues", "isexecutorclosure"}, false),
+        SUNC = standard({"getscriptbytecode", "getscriptclosure", "getscripts", "getloadedmodules", "getgc", "getsenv", "isexecutorclosure", "iscclosure", "writefile", "readfile"}, true),
+        Myriad = standard({"writefile", "readfile", "getgc", "getreg", "getscripts", "getloadedmodules", "getconstants", "getupvalues", "getprotos", "clonefunction", "getactors", "getconnections"}, true),
+        debUNC = standard({"getgc", "getinstances", "getnilinstances", "getscriptbytecode", "getscriptclosure", "getconstants", "getprotos", "getstack", "getsenv", "getactors"}, false)
+    }
+    local summary = {Verified = 0, Present = 0, Failed = 0, Skipped = 0, Total = 0}
+    for _, row in pairs(capProfile.Functions) do
+        summary.Total = summary.Total + 1
+        local key = row.Status == "VERIFIED" and "Verified" or row.Status == "PRESENT" and "Present" or row.Status == "FAILED" and "Failed" or "Skipped"
+        summary[key] = summary[key] + 1
+    end
+    capProfile.Summary = summary
+    timings.Capabilities = os.clock() - started
+    capabilityBusy = false
+    return capProfile
+end
+
+function Capability.ensure()
+    if (capProfile.Summary and capProfile.Summary.Total or 0) == 0 and not capabilityBusy then Capability.run() end
+    local deadline = os.clock() + 10
+    while capabilityBusy and os.clock() < deadline do task.wait(0.05) end
+    return (capProfile.Summary and capProfile.Summary.Total or 0) > 0
+end
+
+local function ensureFolder(path)
+    if not makefolderFn then
+        return false, "makefolder unavailable"
+    end
+    local current = ""
+    for segment in path:gmatch("[^/]+") do
+        current = current == "" and segment or current .. "/" .. segment
+        local exists = false
+        if isfolderFn then
+            local ok, result = pcall(isfolderFn, current)
+            exists = ok and result == true
+        end
+        if not exists then
+            local ok, err = pcall(makefolderFn, current)
+            if not ok and isfolderFn then
+                local ok2, result2 = pcall(isfolderFn, current)
+                if not ok2 or not result2 then
+                    return false, safeString(err)
+                end
+            end
+        end
+    end
+    return true
+end
+
+local function parentPath(path)
+    return path:match("^(.*)/[^/]+$")
+end
+
+local function uniquePath(path)
+    if not usedPaths[path] then
+        usedPaths[path] = true
+        return path
+    end
+    local base, ext = path:match("^(.*)(%.[^%./]+)$")
+    base = base or path
+    ext = ext or ""
+    local i = 2
+    local candidate = base .. "_" .. tostring(i) .. ext
+    while usedPaths[candidate] do
+        i = i + 1
+        candidate = base .. "_" .. tostring(i) .. ext
+    end
+    usedPaths[candidate] = true
+    return candidate
+end
+
+local function writeVerified(path, data, binary)
+    if not writefileFn then
+        return false, "writefile unavailable"
+    end
+    local parent = parentPath(path)
+    if parent then
+        local okFolder, folderErr = ensureFolder(parent)
+        if not okFolder then
+            return false, folderErr
+        end
+    end
+    local ok, err = pcall(writefileFn, path, data)
+    if not ok then
+        return false, safeString(err)
+    end
+    if not binary and readfileFn then
+        local okRead, readBack = pcall(readfileFn, path)
+        if not okRead then
+            return false, "readback failed: " .. safeString(readBack)
+        end
+        if readBack ~= data then
+            return false, "readback content mismatch"
+        end
+    elseif isfileFn then
+        local okFile, exists = pcall(isfileFn, path)
+        if not okFile or not exists then
+            return false, "file missing after write"
+        end
+    end
+    return true
+end
+
+local function timestamp()
     local ok, value = pcall(function()
-        return os.date("!%Y%m%d_%H%M%S")
+        return os.date("%Y%m%d_%H%M%S")
     end)
-    if ok and type(value) == "string" then
+    if ok and value then
         return value
     end
     return tostring(os.time())
 end
 
-local function makeRunRoot()
-    state.BaseRoot = sanitize(state.Game) .. "_" .. tostring(state.PlaceId) .. "_Dump"
-    local base = state.BaseRoot .. "/Run_" .. runStamp()
-    local root = base
-    local index = 2
-    if caps.isfolder then
-        while true do
-            local ok, exists = pcall(isfolderFn, root)
-            if not ok or not exists then
-                break
-            end
-            root = base .. "_" .. tostring(index)
-            index = index + 1
-        end
-    else
-        root = base .. "_" .. shortHash(tostring(os.clock())):sub(1, 4)
+local function relativeSegments(instance, descriptor)
+    local parts = {}
+    local cursor = instance
+    local guard = 0
+    while cursor and cursor ~= descriptor.Instance and guard < 100 do
+        table.insert(parts, 1, sanitize(cursor.Name))
+        cursor = safeParent(cursor)
+        guard = guard + 1
     end
-    return root
+    if #parts == 0 then
+        parts[1] = sanitize(instance.Name)
+    end
+    return parts
 end
 
-local function normalizeSource(value)
-    local s = string.lower(safeString(value or ""))
-    s = s:gsub("^[@=]", "")
-    s = s:gsub("\\", "/")
-    s = s:gsub("/", ".")
-    s = s:gsub("%s+", "")
-    return s
+local function outputPathFor(instance, descriptor, kind, extension)
+    local parts = {state.RunRoot, kind, sanitize(descriptor.Output)}
+    for _, segment in ipairs(relativeSegments(instance, descriptor)) do
+        parts[#parts + 1] = segment
+    end
+    return uniquePath(table.concat(parts, "/") .. extension)
 end
 
 local function isExecutorClosure(fn)
@@ -628,108 +1000,220 @@ local function isExecutorClosure(fn)
     return false
 end
 
-local roots = {
-    {Id = "ReplicatedStorage", Group = "Game", Name = "ReplicatedStorage", Selected = true, Root = function() return ReplicatedStorage end},
-    {Id = "ReplicatedFirst", Group = "Game", Name = "ReplicatedFirst", Selected = true, Root = function() return ReplicatedFirst end},
-    {Id = "Workspace", Group = "Game", Name = "Workspace", Selected = true, Root = function() return Workspace end},
-    {Id = "StarterPlayer", Group = "Game", Name = "StarterPlayer", Selected = true, Root = function() return StarterPlayer end},
-    {Id = "StarterGui", Group = "Game", Name = "StarterGui", Selected = true, Root = function() return StarterGui end},
-    {Id = "StarterPack", Group = "Game", Name = "StarterPack", Selected = true, Root = function() return StarterPack end},
-    {Id = "Lighting", Group = "Game", Name = "Lighting", Selected = true, Root = function() return Lighting end},
-    {Id = "SoundService", Group = "Game", Name = "SoundService", Selected = true, Root = function() return SoundService end},
-    {Id = "TextChatService", Group = "Game", Name = "TextChatService", Selected = false, Root = function() return TextChatService end},
-    {Id = "PlayerScripts", Group = "Local Player", Name = "PlayerScripts", Selected = true, Root = function() return LocalPlayer and LocalPlayer:FindFirstChild("PlayerScripts") end},
-    {Id = "PlayerGui", Group = "Local Player", Name = "PlayerGui", Selected = true, Root = function() return LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui") end},
-    {Id = "Backpack", Group = "Local Player", Name = "Backpack", Selected = true, Root = function() return LocalPlayer and LocalPlayer:FindFirstChild("Backpack") end},
-    {Id = "Character", Group = "Local Player", Name = "Character", Selected = false, Root = function() return LocalPlayer and LocalPlayer.Character end}
-}
-
-local function rootForInstance(instance)
-    local preferred = {"Character", "PlayerScripts", "PlayerGui", "Backpack"}
-    for _, idValue in ipairs(preferred) do
-        for _, entry in ipairs(roots) do
-            if entry.Id == idValue and entry.Selected then
-                local root = entry.Root()
-                if root and (instance == root or isDescendant(instance, root)) then
-                    return entry, root
-                end
-            end
+local function callWithTimeout(seconds, fn)
+    local done = false
+    local okResult
+    local result
+    local thread = task.spawn(function()
+        okResult, result = pcall(fn)
+        done = true
+    end)
+    local started = os.clock()
+    while not done and not state.Cancelled do
+        if os.clock() - started >= seconds then
+            pcall(function()
+                task.cancel(thread)
+            end)
+            return false, "timeout"
         end
+        task.wait(0.03)
     end
-    for _, entry in ipairs(roots) do
-        if entry.Selected then
-            local root = entry.Root()
-            if root and (instance == root or isDescendant(instance, root)) then
-                return entry, root
-            end
-        end
+    if state.Cancelled then
+        pcall(function()
+            task.cancel(thread)
+        end)
+        return false, "cancelled"
+    end
+    return okResult, result
+end
+
+local function rootSelected(key)
+    local descriptor = rootByKey[key]
+    return descriptor and descriptor.Selected == true
+end
+
+local function savePreferences()
+    preferences.Mode = state.Mode
+    preferences.Remotes = options.Remotes
+    preferences.Runtime = options.Runtime
+    preferences.BytecodeFailed = options.BytecodeFailed
+    preferences.FullDump = options.FullDump
+    preferences.LinkedNil = options.LinkedNil
+    preferences.NetworkTrace = options.NetworkTrace
+    preferences.ActorScan = options.ActorScan
+    preferences.Roots = preferences.Roots or {}
+    for _, descriptor in ipairs(rootDescriptors) do
+        preferences.Roots[descriptor.Key] = descriptor.Selected
     end
 end
 
-local function instanceAllowed(instance, entry, root)
-    if not instance or not root then
-        return false, "MissingRoot"
+local function addRoot(key, label, group, output, resolver, defaultSelected)
+    local selected = defaultSelected
+    if type(preferences.Roots) == "table" and preferences.Roots[key] ~= nil then
+        selected = preferences.Roots[key] == true
     end
-    if safeClass(instance) == "CoreScript" then
-        return false, "CoreScript"
+    local descriptor = {
+        Key = key,
+        Label = label,
+        Group = group,
+        Output = output,
+        Resolve = resolver,
+        Instance = nil,
+        Selected = selected,
+        ScriptCount = nil,
+        RemoteCount = nil
+    }
+    rootDescriptors[#rootDescriptors + 1] = descriptor
+    rootByKey[key] = descriptor
+end
+
+addRoot("ReplicatedStorage", "ReplicatedStorage", "Game", "ReplicatedStorage", function() return ReplicatedStorage end, true)
+addRoot("ReplicatedFirst", "ReplicatedFirst", "Game", "ReplicatedFirst", function() return ReplicatedFirst end, true)
+addRoot("Workspace", "Workspace", "Game", "Workspace", function() return Workspace end, true)
+addRoot("StarterPlayer", "StarterPlayer", "Game", "StarterPlayer", function() return StarterPlayer end, true)
+addRoot("StarterGui", "StarterGui", "Game", "StarterGui", function() return StarterGui end, true)
+addRoot("StarterPack", "StarterPack", "Game", "StarterPack", function() return StarterPack end, true)
+addRoot("Lighting", "Lighting", "Game", "Lighting", function() return Lighting end, false)
+addRoot("SoundService", "SoundService", "Game", "SoundService", function() return SoundService end, false)
+addRoot("PlayerScripts", "PlayerScripts", "Local Player", "LocalPlayer/PlayerScripts", function()
+    return LocalPlayer and LocalPlayer:FindFirstChild("PlayerScripts")
+end, true)
+addRoot("PlayerGui", "PlayerGui", "Local Player", "LocalPlayer/PlayerGui", function()
+    return LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui")
+end, true)
+addRoot("Backpack", "Backpack", "Local Player", "LocalPlayer/Backpack", function()
+    return LocalPlayer and LocalPlayer:FindFirstChild("Backpack")
+end, true)
+addRoot("Character", "Character", "Local Player", "LocalPlayer/Character", function()
+    return LocalPlayer and LocalPlayer.Character
+end, false)
+
+local function resolveRoots()
+    for _, descriptor in ipairs(rootDescriptors) do
+        local ok, result = pcall(descriptor.Resolve)
+        descriptor.Instance = ok and result or nil
     end
-    if isDescendant(instance, CoreGui) then
-        return false, "CoreGui"
-    end
-    local characterOwner = belongsToAnyCharacter(instance)
-    if characterOwner then
-        if entry.Id == "Character" and characterOwner == LocalPlayer then
-            return true, "LocalCharacter"
+end
+
+local function descriptorFor(instance)
+    local candidates = {}
+    for _, descriptor in ipairs(rootDescriptors) do
+        if descriptor.Selected and descriptor.Instance and (instance == descriptor.Instance or descendant(instance, descriptor.Instance)) then
+            candidates[#candidates + 1] = descriptor
         end
-        return false, characterOwner == LocalPlayer and "CharacterNotSelected" or "OtherPlayerCharacter"
     end
-    if entry.Group == "Local Player" then
-        if isDefaultLocalObject(instance) then
-            return false, "RobloxDefaultPlayer"
+    table.sort(candidates, function(a, b)
+        if a.Group ~= b.Group then
+            return a.Group == "Local Player"
         end
-        return true, "LocalPlayerRoot"
+        if a.Key == "Character" then
+            return true
+        end
+        if b.Key == "Character" then
+            return false
+        end
+        return #safeFullName(a.Instance) > #safeFullName(b.Instance)
+    end)
+    for _, descriptor in ipairs(candidates) do
+        local allowed, reason = instanceAllowed(instance, descriptor)
+        if allowed then
+            return descriptor, reason
+        end
+        recordReject(reason)
     end
-    return true, "SelectedGameRoot"
 end
 
-local function relativeSegments(instance, root, entry)
-    local segments = {sanitize(entry.Id)}
-    if instance == root then
-        return segments
-    end
-    local chain = {}
-    local cursor = instance
-    local guard = 0
-    while cursor and cursor ~= root and guard < 100 do
-        table.insert(chain, 1, sanitize(cursor.Name))
-        cursor = safeParent(cursor)
-        guard = guard + 1
-    end
-    for _, segment in ipairs(chain) do
-        segments[#segments + 1] = segment
-    end
-    return segments
-end
-
-local function outputPath(kind, entry, root, instance, extension)
-    local parts = {state.RunRoot, kind}
-    for _, segment in ipairs(relativeSegments(instance, root, entry)) do
-        parts[#parts + 1] = segment
-    end
-    local path = table.concat(parts, "/") .. extension
-    return uniquePath(path)
-end
-
-local function setText(object, text)
+local function setLabel(object, text)
     if object then
         pcall(function()
-            object.Text = safeString(text)
+            object.Text = text
         end)
     end
 end
 
-local function new(class, props, parent)
-    local object = Instance.new(class)
+local function progressText()
+    if state.Running and state.Total > 0 then
+        return state.Phase .. "  " .. tostring(state.Processed) .. "/" .. tostring(state.Total)
+    end
+    return state.Message
+end
+
+local function updateUI()
+    setLabel(ui.status, state.Phase)
+    setLabel(ui.gameLabel, state.GameName .. " · " .. tostring(state.PlaceId) .. " · " .. state.Mode)
+    if ui.path then
+        if state.Running or state.Scanning then
+            setLabel(ui.path, progressText())
+        elseif state.RunRoot ~= "" then
+            setLabel(ui.path, state.Message .. " · " .. state.RunRoot)
+        else
+            setLabel(ui.path, state.Message)
+        end
+    end
+    if ui.dumpButton then
+        ui.dumpButton.Active = state.Scanned and not state.Running and not state.Scanning
+        ui.dumpButton.AutoButtonColor = ui.dumpButton.Active
+        ui.dumpButton.TextTransparency = ui.dumpButton.Active and 0 or 0.5
+    end
+    if ui.scanButton then
+        ui.scanButton.Active = not state.Running and not state.Scanning
+        ui.scanButton.AutoButtonColor = ui.scanButton.Active
+        ui.scanButton.Text = state.Scanning and "Scanning..." or "Scan"
+    end
+    if ui.cancelButton then
+        ui.cancelButton.Visible = state.Running or state.Scanning
+    end
+    if ui.capButton then
+        local summary = capProfile.Summary or {Verified = 0, Total = 0}
+        ui.capButton.Text = "CAP " .. tostring(summary.Verified or 0) .. "/" .. tostring(summary.Total or 0)
+    end
+    if ui.refreshCapabilityDrawer and ui.capabilityDrawer and ui.capabilityDrawer.Visible then ui.refreshCapabilityDrawer() end
+    for key, row in pairs(ui.rootRows or {}) do
+        local descriptor = rootByKey[key]
+        if descriptor then
+            local countText = "not scanned"
+            if descriptor.ScriptCount ~= nil then
+                countText = tostring(descriptor.ScriptCount) .. " code · " .. tostring(descriptor.RemoteCount or 0) .. " remotes"
+            end
+            setLabel(row.count, countText)
+            row.check.Text = descriptor.Selected and "✓" or ""
+            row.check.BackgroundColor3 = descriptor.Selected and Color3.fromRGB(171, 237, 188) or Color3.fromRGB(31, 36, 45)
+            row.check.TextColor3 = descriptor.Selected and Color3.fromRGB(15, 28, 18) or Color3.fromRGB(150, 157, 170)
+        end
+    end
+    for mode, button in pairs(ui.modeButtons or {}) do
+        local active = state.Mode == mode
+        button.BackgroundColor3 = active and Color3.fromRGB(173, 239, 190) or Color3.fromRGB(25, 30, 39)
+        button.TextColor3 = active and Color3.fromRGB(15, 31, 19) or Color3.fromRGB(210, 215, 225)
+    end
+    for key, row in pairs(ui.optionRows or {}) do
+        local supported = true
+        if key == "NetworkTrace" then supported = Capability.good("raknet.add_receive_hook") or Capability.good("raknet.add_send_hook") or (capProfile.RakNet and (capProfile.RakNet.OnPacketReceive or capProfile.RakNet.OnPacketSend))
+        elseif key == "ActorScan" then supported = Capability.good("getactors")
+        elseif key == "Runtime" then supported = Capability.good("getloadedmodules") or Capability.good("getscriptclosure") or Capability.good("getsenv") or Capability.good("getgc")
+        elseif key == "BytecodeFailed" then supported = Capability.good("getscriptbytecode") end
+        local active = options[key] == true and supported
+        row.button.Active = supported and not state.Running and not state.Scanning
+        row.check.Text = active and "✓" or ""
+        row.check.BackgroundColor3 = active and Color3.fromRGB(171, 237, 188) or Color3.fromRGB(31, 36, 45)
+        row.check.TextColor3 = active and Color3.fromRGB(15, 28, 18) or Color3.fromRGB(150, 157, 170)
+        if row.label then row.label.TextTransparency = supported and 0 or 0.55 end
+    end
+end
+
+local function invalidateScan()
+    state.Scanned = false
+    state.Message = "Selection changed · scan again"
+    scanCache = {Scripts = {}, Remotes = {}, Counts = {}, Rejected = {}}
+    for _, descriptor in ipairs(rootDescriptors) do
+        descriptor.ScriptCount = nil
+        descriptor.RemoteCount = nil
+    end
+    updateUI()
+end
+
+local function new(className, props, parent)
+    local object = Instance.new(className)
     for key, value in pairs(props or {}) do
         object[key] = value
     end
@@ -737,105 +1221,53 @@ local function new(class, props, parent)
     return object
 end
 
-local function buttonStyle(button, active)
-    button.BackgroundColor3 = active and Color3.fromRGB(219, 239, 201) or Color3.fromRGB(27, 31, 38)
-    button.TextColor3 = active and Color3.fromRGB(20, 26, 17) or Color3.fromRGB(205, 210, 219)
+local function makeCorner(parent, radius)
+    return new("UICorner", {CornerRadius = UDim.new(0, radius or 8)}, parent)
 end
 
-local function updateAdvancedDefaults()
-    if state.Mode == "Strict" then
-        options.RuntimeLinked = false
-        options.LinkedNil = false
-    elseif state.Mode == "Balanced" then
-        options.RuntimeLinked = true
-        options.LinkedNil = false
-    else
-        options.RuntimeLinked = true
-        options.LinkedNil = true
-    end
+local function makeStroke(parent, color)
+    return new("UIStroke", {Color = color or Color3.fromRGB(47, 55, 68), Thickness = 1}, parent)
 end
 
-local function updateUI()
-    setText(ui.phase, state.Phase)
-    setText(ui.codeValue, state.Code)
-    setText(ui.remoteValue, state.Remotes)
-    setText(ui.runtimeValue, state.Runtime)
-    setText(ui.failedValue, state.Failed)
-    setText(ui.path, state.RunRoot ~= "" and state.RunRoot or "No run folder yet")
-    if ui.scanButton then
-        ui.scanButton.Text = state.Scanning and "Scanning..." or "Scan Structure"
-        ui.scanButton.Active = not state.Running and not state.Scanning
-        ui.scanButton.AutoButtonColor = not state.Running and not state.Scanning
-    end
-    if ui.dumpButton then
-        ui.dumpButton.Active = state.ScanReady and not state.Running and not state.Scanning
-        ui.dumpButton.AutoButtonColor = ui.dumpButton.Active
-        ui.dumpButton.TextTransparency = ui.dumpButton.Active and 0 or 0.45
-        ui.dumpButton.Text = state.Running and "Dumping..." or "Dump Selected"
-    end
-    if ui.cancelButton then
-        ui.cancelButton.Visible = state.Running or state.Scanning
-    end
-    if ui.modeButtons then
-        for mode, button in pairs(ui.modeButtons) do
-            buttonStyle(button, mode == state.Mode)
-        end
-    end
-    if ui.optionButtons then
-        for name, button in pairs(ui.optionButtons) do
-            local disabled = state.Mode == "Strict" and (name == "RuntimeLinked" or name == "LinkedNil")
-            button.Text = (options[name] and "☑ " or "☐ ") .. button:GetAttribute("Label")
-            button.TextColor3 = disabled and Color3.fromRGB(84, 88, 98) or Color3.fromRGB(190, 196, 207)
-            button.Active = not disabled and not state.Running and not state.Scanning
-        end
-    end
-    if ui.rootButtons then
-        for _, entry in ipairs(roots) do
-            local button = ui.rootButtons[entry.Id]
-            if button then
-                button.Text = (entry.Selected and "☑  " or "☐  ") .. entry.Name
-                button.TextColor3 = entry.Selected and Color3.fromRGB(229, 233, 239) or Color3.fromRGB(128, 135, 147)
-            end
-            local count = ui.rootCounts and ui.rootCounts[entry.Id]
-            if count then
-                local scan = scanCache[entry.Id]
-                if scan then
-                    count.Text = tostring(scan.Scripts) .. " scripts  ·  " .. tostring(scan.Remotes) .. " remotes"
-                else
-                    count.Text = "not scanned"
-                end
-            end
-        end
-    end
+local function tween(object, duration, properties, style, direction)
+    local ok, result = pcall(function()
+        local animation = TweenService:Create(object, TweenInfo.new(duration or 0.18, style or Enum.EasingStyle.Quart, direction or Enum.EasingDirection.Out), properties)
+        animation:Play()
+        return animation
+    end)
+    return ok and result or nil
+end
+
+local function bindHover(button, normalColor, hoverColor)
+    button.MouseEnter:Connect(function() if button.Active ~= false then tween(button, 0.12, {BackgroundColor3 = hoverColor}) end end)
+    button.MouseLeave:Connect(function() tween(button, 0.12, {BackgroundColor3 = normalColor}) end)
 end
 
 local function buildUI()
     local parent
     if gethuiFn then
         local ok, result = pcall(gethuiFn)
-        if ok and result then
+        if ok then
             parent = result
         end
     end
     if not parent then
         parent = CoreGui
         local ok = pcall(function()
-            local test = Instance.new("Folder")
-            test.Name = "__any_dumper_test"
-            test.Parent = parent
-            test:Destroy()
+            local probe = Instance.new("Folder")
+            probe.Name = "__any_dumper_probe"
+            probe.Parent = parent
+            probe:Destroy()
         end)
         if not ok and LocalPlayer then
             parent = LocalPlayer:WaitForChild("PlayerGui")
         end
     end
 
-    pcall(function()
-        local old = parent:FindFirstChild("AnyDumperUI")
-        if old then
-            old:Destroy()
-        end
-    end)
+    local old = parent:FindFirstChild("AnyDumperUI")
+    if old then
+        old:Destroy()
+    end
 
     local gui = new("ScreenGui", {
         Name = "AnyDumperUI",
@@ -844,359 +1276,490 @@ local function buildUI()
     }, parent)
 
     local frame = new("Frame", {
-        Size = UDim2.fromOffset(620, 600),
-        Position = UDim2.new(0.5, -310, 0.5, -300),
-        BackgroundColor3 = Color3.fromRGB(13, 15, 19),
+        Size = UDim2.fromOffset(510, 438),
+        Position = UDim2.new(0.5, -255, 0.5, -219),
+        BackgroundColor3 = Color3.fromRGB(13, 17, 23),
         BorderSizePixel = 0
     }, gui)
-    new("UICorner", {CornerRadius = UDim.new(0, 14)}, frame)
-    new("UIStroke", {Color = Color3.fromRGB(42, 46, 55), Thickness = 1}, frame)
+    makeCorner(frame, 13)
+    makeStroke(frame, Color3.fromRGB(57, 72, 91))
 
-    local top = new("Frame", {Size = UDim2.new(1, 0, 0, 64), BackgroundTransparency = 1}, frame)
+    local top = new("Frame", {
+        Size = UDim2.new(1, 0, 0, 54),
+        BackgroundTransparency = 1
+    }, frame)
+
     new("TextLabel", {
-        Size = UDim2.new(1, -180, 0, 26),
-        Position = UDim2.fromOffset(18, 10),
+        Size = UDim2.new(1, -160, 0, 24),
+        Position = UDim2.fromOffset(17, 10),
         BackgroundTransparency = 1,
         Text = "any dumper",
-        TextColor3 = Color3.fromRGB(242, 244, 247),
         Font = Enum.Font.GothamBold,
-        TextSize = 19,
+        TextSize = 18,
+        TextColor3 = Color3.fromRGB(241, 244, 248),
         TextXAlignment = Enum.TextXAlignment.Left
     }, top)
+
     new("TextLabel", {
-        Size = UDim2.new(1, -180, 0, 18),
-        Position = UDim2.fromOffset(19, 34),
+        Size = UDim2.new(1, -160, 0, 15),
+        Position = UDim2.fromOffset(18, 33),
         BackgroundTransparency = 1,
-        Text = "any ne  ·  game code selector",
-        TextColor3 = Color3.fromRGB(104, 111, 123),
+        Text = "any ne · game code selector",
         Font = Enum.Font.Gotham,
         TextSize = 10,
+        TextColor3 = Color3.fromRGB(122, 133, 148),
         TextXAlignment = Enum.TextXAlignment.Left
     }, top)
 
-    ui.phase = new("TextLabel", {
-        Size = UDim2.fromOffset(122, 28),
-        Position = UDim2.new(1, -140, 0, 15),
-        BackgroundColor3 = Color3.fromRGB(24, 28, 34),
+    ui.capButton = new("TextButton", {
+        Size = UDim2.fromOffset(86, 27),
+        Position = UDim2.new(1, -205, 0, 13),
+        BackgroundColor3 = Color3.fromRGB(24, 29, 38),
+        BorderSizePixel = 0,
+        Text = "CAP 0/0",
+        Font = Enum.Font.GothamSemibold,
+        TextSize = 9,
+        TextColor3 = Color3.fromRGB(171, 185, 204),
+        AutoButtonColor = false
+    }, top)
+    makeCorner(ui.capButton, 8)
+    makeStroke(ui.capButton, Color3.fromRGB(48, 58, 72))
+    bindHover(ui.capButton, Color3.fromRGB(24, 29, 38), Color3.fromRGB(31, 38, 49))
+
+    ui.status = new("TextLabel", {
+        Size = UDim2.fromOffset(94, 27),
+        Position = UDim2.new(1, -111, 0, 13),
+        BackgroundColor3 = Color3.fromRGB(22, 39, 35),
         BorderSizePixel = 0,
         Text = "READY",
-        TextColor3 = Color3.fromRGB(158, 218, 178),
         Font = Enum.Font.GothamSemibold,
-        TextSize = 10
+        TextSize = 10,
+        TextColor3 = Color3.fromRGB(180, 240, 195)
     }, top)
-    new("UICorner", {CornerRadius = UDim.new(0, 8)}, ui.phase)
+    makeCorner(ui.status, 8)
 
-    local gameLine = new("TextLabel", {
-        Size = UDim2.new(1, -36, 0, 26),
-        Position = UDim2.fromOffset(18, 62),
+    ui.gameLabel = new("TextLabel", {
+        Size = UDim2.new(1, -34, 0, 18),
+        Position = UDim2.fromOffset(17, 58),
         BackgroundTransparency = 1,
-        Text = state.Game .. "  ·  " .. tostring(state.PlaceId),
-        TextColor3 = Color3.fromRGB(178, 184, 194),
-        Font = Enum.Font.Gotham,
-        TextSize = 11,
+        Text = state.GameName .. " · " .. tostring(state.PlaceId),
+        Font = Enum.Font.Code,
+        TextSize = 10,
+        TextColor3 = Color3.fromRGB(138, 151, 170),
         TextXAlignment = Enum.TextXAlignment.Left,
         TextTruncate = Enum.TextTruncate.AtEnd
     }, frame)
-    ui.gameLine = gameLine
 
-    new("TextLabel", {
-        Size = UDim2.fromOffset(110, 18),
-        Position = UDim2.fromOffset(18, 94),
+    local capabilityDrawer = new("Frame", {
+        Size = UDim2.fromOffset(220, 0),
+        Position = UDim2.new(1, -237, 0, 47),
+        BackgroundColor3 = Color3.fromRGB(15, 20, 27),
         BackgroundTransparency = 1,
-        Text = "1  MODE",
-        TextColor3 = Color3.fromRGB(100, 106, 118),
-        Font = Enum.Font.GothamSemibold,
-        TextSize = 9,
-        TextXAlignment = Enum.TextXAlignment.Left
+        BorderSizePixel = 0,
+        ClipsDescendants = true,
+        Visible = false,
+        ZIndex = 30
+    }, frame)
+    makeCorner(capabilityDrawer, 9)
+    makeStroke(capabilityDrawer, Color3.fromRGB(55, 67, 83))
+    local capExecutor = new("TextLabel", {Size = UDim2.new(1, -20, 0, 18), Position = UDim2.fromOffset(10, 12), BackgroundTransparency = 1, Text = capProfile.Executor, Font = Enum.Font.Code, TextSize = 9, TextColor3 = Color3.fromRGB(220, 224, 231), TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 31}, capabilityDrawer)
+    local drawerText = new("TextLabel", {Size = UDim2.new(1, -20, 0, 145), Position = UDim2.fromOffset(10, 34), BackgroundTransparency = 1, Text = "", Font = Enum.Font.Code, TextSize = 9, TextColor3 = Color3.fromRGB(162, 174, 190), TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top, ZIndex = 31}, capabilityDrawer)
+    local function refreshDrawer()
+        local function standardLine(name) local row = capProfile.Standards[name] or {Passed = 0, Total = 0}; return name .. "  " .. tostring(row.Passed) .. "/" .. tostring(row.Total) end
+        drawerText.Text = table.concat({
+            "Decompiler   " .. Capability.best({"decompile", "getscriptbytecode"}),
+            "Runtime      " .. Capability.best({"getgc", "getloadedmodules", "getscriptclosure", "getsenv"}),
+            "Actors       " .. Capability.best({"getactors", "getactorthreads"}),
+            "RakNet       " .. Capability.best({"raknet.add_receive_hook", "raknet.add_send_hook", "raknet"}),
+            "", standardLine("UNC"), standardLine("SUNC"), standardLine("Myriad"), standardLine("debUNC")
+        }, "\n")
+        capExecutor.Text = capProfile.Executor
+    end
+    ui.refreshCapabilityDrawer = refreshDrawer
+    ui.capabilityDrawer = capabilityDrawer
+    local capOpen = false
+    ui.capButton.MouseButton1Click:Connect(function()
+        capOpen = not capOpen
+        if capOpen then
+            refreshDrawer()
+            capabilityDrawer.Visible = true
+            capabilityDrawer.Size = UDim2.fromOffset(220, 0)
+            capabilityDrawer.BackgroundTransparency = 1
+            tween(capabilityDrawer, 0.18, {Size = UDim2.fromOffset(220, 188), BackgroundTransparency = 0})
+        else
+            tween(capabilityDrawer, 0.16, {Size = UDim2.fromOffset(220, 0), BackgroundTransparency = 1})
+            task.delay(0.17, function() if not capOpen then capabilityDrawer.Visible = false end end)
+        end
+    end)
+
+    local modeBar = new("Frame", {
+        Size = UDim2.new(1, -34, 0, 36),
+        Position = UDim2.fromOffset(17, 84),
+        BackgroundTransparency = 1
     }, frame)
 
     ui.modeButtons = {}
     local modes = {"Strict", "Balanced", "Deep"}
     for i, mode in ipairs(modes) do
         local button = new("TextButton", {
-            Size = UDim2.fromOffset(128, 34),
-            Position = UDim2.fromOffset(18 + (i - 1) * 136, 116),
-            BackgroundColor3 = Color3.fromRGB(27, 31, 38),
+            Size = UDim2.new(0, 100, 1, 0),
+            Position = UDim2.fromOffset((i - 1) * 108, 0),
+            BackgroundColor3 = Color3.fromRGB(25, 30, 39),
             BorderSizePixel = 0,
             Text = mode,
-            TextColor3 = Color3.fromRGB(205, 210, 219),
             Font = Enum.Font.GothamSemibold,
             TextSize = 11,
+            TextColor3 = Color3.fromRGB(210, 215, 225),
             AutoButtonColor = false
-        }, frame)
-        new("UICorner", {CornerRadius = UDim.new(0, 8)}, button)
-        new("UIStroke", {Color = Color3.fromRGB(43, 48, 58), Thickness = 1}, button)
+        }, modeBar)
+        makeCorner(button, 8)
+        makeStroke(button)
         ui.modeButtons[mode] = button
         button.MouseButton1Click:Connect(function()
             if state.Running or state.Scanning then
                 return
             end
             state.Mode = mode
-            genv.AnyDumper_Mode = mode
-            updateAdvancedDefaults()
+            savePreferences()
             updateUI()
         end)
     end
 
     ui.scanButton = new("TextButton", {
-        Size = UDim2.fromOffset(174, 34),
-        Position = UDim2.new(1, -192, 0, 116),
-        BackgroundColor3 = Color3.fromRGB(230, 232, 236),
+        Size = UDim2.new(1, -336, 1, 0),
+        Position = UDim2.fromOffset(336, 0),
+        BackgroundColor3 = Color3.fromRGB(26, 32, 42),
         BorderSizePixel = 0,
-        Text = "Scan Structure",
-        TextColor3 = Color3.fromRGB(18, 20, 24),
+        Text = "Scan",
         Font = Enum.Font.GothamSemibold,
-        TextSize = 11
+        TextSize = 11,
+        TextColor3 = Color3.fromRGB(221, 226, 234)
+    }, modeBar)
+    makeCorner(ui.scanButton, 8)
+    makeStroke(ui.scanButton)
+    bindHover(ui.scanButton, Color3.fromRGB(26, 32, 42), Color3.fromRGB(34, 41, 53))
+
+    local rootsPanel = new("Frame", {
+        Size = UDim2.new(1, -34, 0, 190),
+        Position = UDim2.fromOffset(17, 132),
+        BackgroundColor3 = Color3.fromRGB(16, 21, 28),
+        BorderSizePixel = 0
     }, frame)
-    new("UICorner", {CornerRadius = UDim.new(0, 8)}, ui.scanButton)
+    makeCorner(rootsPanel, 9)
+    makeStroke(rootsPanel)
 
     new("TextLabel", {
-        Size = UDim2.fromOffset(160, 18),
-        Position = UDim2.fromOffset(18, 164),
+        Size = UDim2.new(1, -20, 0, 24),
+        Position = UDim2.fromOffset(10, 5),
         BackgroundTransparency = 1,
-        Text = "2  SELECT ROOTS",
-        TextColor3 = Color3.fromRGB(100, 106, 118),
+        Text = "ROOTS",
         Font = Enum.Font.GothamSemibold,
-        TextSize = 9,
+        TextSize = 10,
+        TextColor3 = Color3.fromRGB(139, 162, 190),
         TextXAlignment = Enum.TextXAlignment.Left
-    }, frame)
+    }, rootsPanel)
 
-    local tree = new("ScrollingFrame", {
-        Size = UDim2.new(1, -36, 0, 254),
-        Position = UDim2.fromOffset(18, 187),
-        BackgroundColor3 = Color3.fromRGB(18, 21, 26),
+    local scrolling = new("ScrollingFrame", {
+        Size = UDim2.new(1, -12, 1, -34),
+        Position = UDim2.fromOffset(6, 30),
+        BackgroundTransparency = 1,
         BorderSizePixel = 0,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
         ScrollBarThickness = 4,
-        ScrollBarImageColor3 = Color3.fromRGB(76, 84, 97),
-        AutomaticCanvasSize = Enum.AutomaticSize.Y,
-        CanvasSize = UDim2.new()
-    }, frame)
-    new("UICorner", {CornerRadius = UDim.new(0, 9)}, tree)
-    new("UIStroke", {Color = Color3.fromRGB(39, 43, 52), Thickness = 1}, tree)
-    local layout = new("UIListLayout", {Padding = UDim.new(0, 0), SortOrder = Enum.SortOrder.LayoutOrder}, tree)
-    local padding = new("UIPadding", {PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 6)}, tree)
+        ScrollBarImageColor3 = Color3.fromRGB(78, 91, 111)
+    }, rootsPanel)
+    local layout = new("UIListLayout", {
+        Padding = UDim.new(0, 3),
+        SortOrder = Enum.SortOrder.LayoutOrder
+    }, scrolling)
 
-    ui.rootButtons = {}
-    ui.rootCounts = {}
-    local currentGroup
+    ui.rootRows = {}
     local order = 0
-    for _, entry in ipairs(roots) do
-        if entry.Group ~= currentGroup then
-            currentGroup = entry.Group
+    local lastGroup
+    for _, descriptor in ipairs(rootDescriptors) do
+        if descriptor.Group ~= lastGroup then
             order = order + 1
             new("TextLabel", {
-                LayoutOrder = order,
-                Size = UDim2.new(1, -16, 0, 28),
+                Size = UDim2.new(1, -4, 0, 22),
                 BackgroundTransparency = 1,
-                Text = "   ▼  " .. string.upper(currentGroup),
-                TextColor3 = Color3.fromRGB(105, 112, 124),
+                Text = string.upper(descriptor.Group),
                 Font = Enum.Font.GothamSemibold,
                 TextSize = 9,
-                TextXAlignment = Enum.TextXAlignment.Left
-            }, tree)
+                TextColor3 = Color3.fromRGB(105, 119, 139),
+                TextXAlignment = Enum.TextXAlignment.Left,
+                LayoutOrder = order
+            }, scrolling)
+            lastGroup = descriptor.Group
         end
         order = order + 1
-        local row = new("Frame", {
-            LayoutOrder = order,
-            Size = UDim2.new(1, -12, 0, 34),
-            BackgroundColor3 = Color3.fromRGB(21, 24, 30),
-            BorderSizePixel = 0
-        }, tree)
-        new("UIPadding", {PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 10)}, row)
-        local button = new("TextButton", {
-            Size = UDim2.new(0.56, 0, 1, 0),
-            BackgroundTransparency = 1,
+        local row = new("TextButton", {
+            Size = UDim2.new(1, -4, 0, 28),
+            BackgroundColor3 = Color3.fromRGB(19, 24, 32),
+            BorderSizePixel = 0,
             Text = "",
-            TextColor3 = Color3.fromRGB(226, 230, 236),
-            Font = Enum.Font.Gotham,
+            AutoButtonColor = false,
+            LayoutOrder = order
+        }, scrolling)
+        makeCorner(row, 6)
+        bindHover(row, Color3.fromRGB(19, 24, 32), Color3.fromRGB(24, 30, 40))
+        local check = new("TextLabel", {
+            Size = UDim2.fromOffset(18, 18),
+            Position = UDim2.fromOffset(7, 5),
+            BackgroundColor3 = Color3.fromRGB(31, 36, 45),
+            BorderSizePixel = 0,
+            Text = "",
+            Font = Enum.Font.GothamBold,
             TextSize = 11,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            AutoButtonColor = false
+            TextColor3 = Color3.fromRGB(15, 28, 18)
+        }, row)
+        makeCorner(check, 4)
+        new("TextLabel", {
+            Size = UDim2.new(0.56, -36, 1, 0),
+            Position = UDim2.fromOffset(33, 0),
+            BackgroundTransparency = 1,
+            Text = descriptor.Label,
+            Font = Enum.Font.Gotham,
+            TextSize = 10,
+            TextColor3 = Color3.fromRGB(220, 224, 231),
+            TextXAlignment = Enum.TextXAlignment.Left
         }, row)
         local count = new("TextLabel", {
-            Size = UDim2.new(0.44, 0, 1, 0),
+            Size = UDim2.new(0.44, -10, 1, 0),
             Position = UDim2.new(0.56, 0, 0, 0),
             BackgroundTransparency = 1,
             Text = "not scanned",
-            TextColor3 = Color3.fromRGB(111, 118, 130),
             Font = Enum.Font.Code,
             TextSize = 9,
+            TextColor3 = Color3.fromRGB(112, 126, 146),
             TextXAlignment = Enum.TextXAlignment.Right
         }, row)
-        ui.rootButtons[entry.Id] = button
-        ui.rootCounts[entry.Id] = count
-        button.MouseButton1Click:Connect(function()
+        ui.rootRows[descriptor.Key] = {button = row, check = check, count = count}
+        row.MouseButton1Click:Connect(function()
             if state.Running or state.Scanning then
                 return
             end
-            entry.Selected = not entry.Selected
-            updateUI()
+            descriptor.Selected = not descriptor.Selected
+            savePreferences()
+            invalidateScan()
         end)
     end
 
-    new("TextLabel", {
-        Size = UDim2.fromOffset(160, 18),
-        Position = UDim2.fromOffset(18, 451),
-        BackgroundTransparency = 1,
-        Text = "3  ADVANCED",
-        TextColor3 = Color3.fromRGB(100, 106, 118),
+    layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        scrolling.CanvasSize = UDim2.fromOffset(0, layout.AbsoluteContentSize.Y + 4)
+    end)
+
+    local advancedHeader = new("TextButton", {
+        Size = UDim2.new(1, -34, 0, 32),
+        Position = UDim2.fromOffset(17, 332),
+        BackgroundColor3 = Color3.fromRGB(18, 23, 31),
+        BorderSizePixel = 0,
+        Text = "Advanced  ▸",
         Font = Enum.Font.GothamSemibold,
-        TextSize = 9,
+        TextSize = 10,
+        TextColor3 = Color3.fromRGB(164, 177, 195),
         TextXAlignment = Enum.TextXAlignment.Left
     }, frame)
+    makeCorner(advancedHeader, 7)
+    bindHover(advancedHeader, Color3.fromRGB(18, 23, 31), Color3.fromRGB(24, 30, 40))
+    new("UIPadding", {PaddingLeft = UDim.new(0, 11)}, advancedHeader)
 
-    ui.optionButtons = {}
+    local advanced = new("Frame", {
+        Size = UDim2.new(1, -34, 0, 96),
+        Position = UDim2.fromOffset(17, 367),
+        BackgroundColor3 = Color3.fromRGB(16, 21, 28),
+        BorderSizePixel = 0,
+        Visible = false
+    }, frame)
+    makeCorner(advanced, 8)
+    makeStroke(advanced)
+
+    ui.optionRows = {}
     local optionDefs = {
         {"Remotes", "Remotes"},
-        {"RuntimeLinked", "Runtime linked"},
-        {"Bytecode", "Bytecode"},
+        {"Runtime", "Runtime linked"},
+        {"BytecodeFailed", "Bytecode fallback"},
         {"FullDump", "Full dump"},
-        {"LinkedNil", "Linked nil"}
+        {"LinkedNil", "Linked nil"},
+        {"NetworkTrace", "Network trace"},
+        {"ActorScan", "Actor scan"}
     }
     for i, def in ipairs(optionDefs) do
-        local button = new("TextButton", {
-            Size = UDim2.fromOffset(i == 2 and 122 or 96, 28),
-            Position = UDim2.fromOffset(18 + (i - 1) * 112, 473),
-            BackgroundColor3 = Color3.fromRGB(22, 25, 31),
+        local column = (i - 1) % 3
+        local rowIndex = math.floor((i - 1) / 3)
+        local row = new("TextButton", {
+            Size = UDim2.fromOffset(148, 27),
+            Position = UDim2.fromOffset(8 + column * 156, 5 + rowIndex * 30),
+            BackgroundTransparency = 1,
             BorderSizePixel = 0,
             Text = "",
-            TextColor3 = Color3.fromRGB(190, 196, 207),
+            AutoButtonColor = false
+        }, advanced)
+        local check = new("TextLabel", {
+            Size = UDim2.fromOffset(17, 17),
+            Position = UDim2.fromOffset(0, 5),
+            BackgroundColor3 = Color3.fromRGB(31, 36, 45),
+            BorderSizePixel = 0,
+            Text = "",
+            Font = Enum.Font.GothamBold,
+            TextSize = 10
+        }, row)
+        makeCorner(check, 4)
+        local optionLabel = new("TextLabel", {
+            Size = UDim2.new(1, -24, 1, 0),
+            Position = UDim2.fromOffset(24, 0),
+            BackgroundTransparency = 1,
+            Text = def[2],
             Font = Enum.Font.Gotham,
             TextSize = 9,
-            AutoButtonColor = false
-        }, frame)
-        button:SetAttribute("Label", def[2])
-        new("UICorner", {CornerRadius = UDim.new(0, 7)}, button)
-        new("UIStroke", {Color = Color3.fromRGB(39, 44, 53), Thickness = 1}, button)
-        ui.optionButtons[def[1]] = button
-        button.MouseButton1Click:Connect(function()
-            if state.Running or state.Scanning then
-                return
-            end
-            if state.Mode == "Strict" and (def[1] == "RuntimeLinked" or def[1] == "LinkedNil") then
-                return
-            end
+            TextColor3 = Color3.fromRGB(196, 203, 214),
+            TextXAlignment = Enum.TextXAlignment.Left
+        }, row)
+        ui.optionRows[def[1]] = {button = row, check = check, label = optionLabel}
+        row.MouseButton1Click:Connect(function()
+            if state.Running or state.Scanning then return end
+            if def[1] == "NetworkTrace" and not (Capability.good("raknet.add_receive_hook") or Capability.good("raknet.add_send_hook") or (capProfile.RakNet and (capProfile.RakNet.OnPacketReceive or capProfile.RakNet.OnPacketSend))) then state.Message = "RakNet passive hooks unavailable"; updateUI(); return end
+            if def[1] == "ActorScan" and not Capability.good("getactors") then state.Message = "Actor API unavailable"; updateUI(); return end
             options[def[1]] = not options[def[1]]
+            savePreferences()
             updateUI()
         end)
     end
 
     local actions = new("Frame", {
-        Size = UDim2.new(1, -36, 0, 42),
-        Position = UDim2.fromOffset(18, 514),
+        Size = UDim2.new(1, -34, 0, 36),
+        Position = UDim2.fromOffset(17, 371),
         BackgroundTransparency = 1
     }, frame)
+    ui.actions = actions
 
     local recommended = new("TextButton", {
-        Size = UDim2.fromOffset(128, 36),
-        BackgroundColor3 = Color3.fromRGB(25, 29, 36),
+        Size = UDim2.fromOffset(105, 34),
+        BackgroundColor3 = Color3.fromRGB(24, 29, 38),
         BorderSizePixel = 0,
         Text = "Recommended",
-        TextColor3 = Color3.fromRGB(201, 207, 217),
-        Font = Enum.Font.GothamSemibold,
-        TextSize = 10
-    }, actions)
-    new("UICorner", {CornerRadius = UDim.new(0, 8)}, recommended)
-
-    local clear = new("TextButton", {
-        Size = UDim2.fromOffset(82, 36),
-        Position = UDim2.fromOffset(136, 0),
-        BackgroundColor3 = Color3.fromRGB(25, 29, 36),
-        BorderSizePixel = 0,
-        Text = "Clear",
-        TextColor3 = Color3.fromRGB(201, 207, 217),
-        Font = Enum.Font.GothamSemibold,
-        TextSize = 10
-    }, actions)
-    new("UICorner", {CornerRadius = UDim.new(0, 8)}, clear)
-
-    ui.cancelButton = new("TextButton", {
-        Size = UDim2.fromOffset(82, 36),
-        Position = UDim2.new(1, -270, 0, 0),
-        BackgroundColor3 = Color3.fromRGB(48, 28, 33),
-        BorderSizePixel = 0,
-        Text = "Cancel",
-        TextColor3 = Color3.fromRGB(240, 162, 170),
         Font = Enum.Font.GothamSemibold,
         TextSize = 10,
+        TextColor3 = Color3.fromRGB(211, 217, 226)
+    }, actions)
+    makeCorner(recommended, 8)
+    makeStroke(recommended)
+    bindHover(recommended, Color3.fromRGB(24, 29, 38), Color3.fromRGB(32, 39, 50))
+
+    local clear = new("TextButton", {
+        Size = UDim2.fromOffset(70, 34),
+        Position = UDim2.fromOffset(113, 0),
+        BackgroundColor3 = Color3.fromRGB(24, 29, 38),
+        BorderSizePixel = 0,
+        Text = "Clear",
+        Font = Enum.Font.GothamSemibold,
+        TextSize = 10,
+        TextColor3 = Color3.fromRGB(211, 217, 226)
+    }, actions)
+    makeCorner(clear, 8)
+    makeStroke(clear)
+    bindHover(clear, Color3.fromRGB(24, 29, 38), Color3.fromRGB(32, 39, 50))
+
+    ui.cancelButton = new("TextButton", {
+        Size = UDim2.fromOffset(72, 34),
+        Position = UDim2.fromOffset(191, 0),
+        BackgroundColor3 = Color3.fromRGB(44, 28, 31),
+        BorderSizePixel = 0,
+        Text = "Cancel",
+        Font = Enum.Font.GothamSemibold,
+        TextSize = 10,
+        TextColor3 = Color3.fromRGB(239, 171, 177),
         Visible = false
     }, actions)
-    new("UICorner", {CornerRadius = UDim.new(0, 8)}, ui.cancelButton)
+    makeCorner(ui.cancelButton, 8)
 
     ui.dumpButton = new("TextButton", {
-        Size = UDim2.fromOffset(180, 36),
-        Position = UDim2.new(1, -180, 0, 0),
-        BackgroundColor3 = Color3.fromRGB(230, 232, 236),
+        Size = UDim2.new(1, -275, 0, 34),
+        Position = UDim2.fromOffset(275, 0),
+        BackgroundColor3 = Color3.fromRGB(173, 239, 190),
         BorderSizePixel = 0,
         Text = "Dump Selected",
-        TextColor3 = Color3.fromRGB(18, 20, 24),
-        Font = Enum.Font.GothamSemibold,
-        TextSize = 10
+        Font = Enum.Font.GothamBold,
+        TextSize = 10,
+        TextColor3 = Color3.fromRGB(15, 31, 19),
+        AutoButtonColor = false
     }, actions)
-    new("UICorner", {CornerRadius = UDim.new(0, 8)}, ui.dumpButton)
+    makeCorner(ui.dumpButton, 8)
+    bindHover(ui.dumpButton, Color3.fromRGB(173, 239, 190), Color3.fromRGB(190, 247, 204))
 
     ui.path = new("TextLabel", {
-        Size = UDim2.new(1, -36, 0, 30),
-        Position = UDim2.fromOffset(18, 562),
-        BackgroundColor3 = Color3.fromRGB(18, 21, 26),
-        BorderSizePixel = 0,
+        Size = UDim2.new(1, -34, 0, 22),
+        Position = UDim2.fromOffset(17, 410),
+        BackgroundTransparency = 1,
         Text = "No run folder yet",
-        TextColor3 = Color3.fromRGB(102, 110, 123),
         Font = Enum.Font.Code,
         TextSize = 9,
+        TextColor3 = Color3.fromRGB(102, 116, 136),
         TextXAlignment = Enum.TextXAlignment.Left,
         TextTruncate = Enum.TextTruncate.AtEnd
     }, frame)
-    new("UICorner", {CornerRadius = UDim.new(0, 8)}, ui.path)
-    new("UIPadding", {PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10)}, ui.path)
 
-    local stats = new("Frame", {
-        Size = UDim2.fromOffset(218, 18),
-        Position = UDim2.new(1, -236, 0, 92),
-        BackgroundTransparency = 1
-    }, frame)
-    ui.codeValue = new("TextLabel", {Size = UDim2.fromOffset(50, 18), BackgroundTransparency = 1, Text = "0", TextColor3 = Color3.fromRGB(166, 172, 183), Font = Enum.Font.Code, TextSize = 9}, stats)
-    ui.remoteValue = new("TextLabel", {Size = UDim2.fromOffset(50, 18), Position = UDim2.fromOffset(54, 0), BackgroundTransparency = 1, Text = "0", TextColor3 = Color3.fromRGB(166, 172, 183), Font = Enum.Font.Code, TextSize = 9}, stats)
-    ui.runtimeValue = new("TextLabel", {Size = UDim2.fromOffset(50, 18), Position = UDim2.fromOffset(108, 0), BackgroundTransparency = 1, Text = "0", TextColor3 = Color3.fromRGB(166, 172, 183), Font = Enum.Font.Code, TextSize = 9}, stats)
-    ui.failedValue = new("TextLabel", {Size = UDim2.fromOffset(50, 18), Position = UDim2.fromOffset(162, 0), BackgroundTransparency = 1, Text = "0", TextColor3 = Color3.fromRGB(221, 139, 148), Font = Enum.Font.Code, TextSize = 9}, stats)
+
+    local advancedOpen = false
+    local function applyAdvanced()
+        advancedHeader.Text = advancedOpen and "Advanced  ▾" or "Advanced  ▸"
+        local targetActions = UDim2.fromOffset(17, advancedOpen and 470 or 371)
+        local targetPath = UDim2.fromOffset(17, advancedOpen and 509 or 410)
+        local targetSize = UDim2.fromOffset(510, advancedOpen and 537 or 438)
+        if advancedOpen then
+            advanced.Visible = true
+            advanced.Size = UDim2.new(1, -34, 0, 0)
+            advanced.BackgroundTransparency = 1
+            tween(advanced, 0.18, {Size = UDim2.new(1, -34, 0, 96), BackgroundTransparency = 0})
+        else
+            tween(advanced, 0.16, {Size = UDim2.new(1, -34, 0, 0), BackgroundTransparency = 1})
+            task.delay(0.17, function() if not advancedOpen then advanced.Visible = false end end)
+        end
+        tween(actions, 0.18, {Position = targetActions})
+        tween(ui.path, 0.18, {Position = targetPath})
+        tween(frame, 0.18, {Size = targetSize})
+    end
+
+    advancedHeader.MouseButton1Click:Connect(function()
+        advancedOpen = not advancedOpen
+        applyAdvanced()
+    end)
 
     recommended.MouseButton1Click:Connect(function()
         if state.Running or state.Scanning then
             return
         end
-        local recommendedIds = {
-            ReplicatedStorage = true,
-            ReplicatedFirst = true,
-            Workspace = true,
-            StarterPlayer = true,
-            StarterGui = true,
-            StarterPack = true,
-            Lighting = true,
-            SoundService = true,
-            PlayerScripts = true,
-            PlayerGui = true,
-            Backpack = true
-        }
-        for _, entry in ipairs(roots) do
-            entry.Selected = recommendedIds[entry.Id] == true
+        for _, descriptor in ipairs(rootDescriptors) do
+            descriptor.Selected = descriptor.Key ~= "Lighting" and descriptor.Key ~= "SoundService" and descriptor.Key ~= "Character"
         end
-        updateUI()
+        options.Remotes = true
+        options.Runtime = true
+        options.BytecodeFailed = true
+        options.FullDump = false
+        options.LinkedNil = false
+        options.NetworkTrace = false
+        options.ActorScan = true
+        state.Mode = "Balanced"
+        savePreferences()
+        invalidateScan()
     end)
 
     clear.MouseButton1Click:Connect(function()
         if state.Running or state.Scanning then
             return
         end
-        for _, entry in ipairs(roots) do
-            entry.Selected = false
+        for _, descriptor in ipairs(rootDescriptors) do
+            descriptor.Selected = false
         end
-        updateUI()
+        savePreferences()
+        invalidateScan()
     end)
 
     ui.cancelButton.MouseButton1Click:Connect(function()
-        state.Cancelled = true
-        state.Phase = "CANCELLING"
-        updateUI()
+        if state.Running or state.Scanning then
+            state.Cancelled = true
+            state.Message = "Cancelling..."
+            updateUI()
+        end
     end)
 
     local dragging = false
@@ -1207,11 +1770,11 @@ local function buildUI()
             dragging = true
             dragStart = input.Position
             startPosition = frame.Position
-        end
-    end)
-    top.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = false
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
         end
     end)
     UserInputService.InputChanged:Connect(function(input)
@@ -1223,208 +1786,294 @@ local function buildUI()
 
     ui.gui = gui
     ui.frame = frame
-    return gui
+    ui.advanced = advanced
+    ui.advancedHeader = advancedHeader
+    ui.recommended = recommended
+    ui.clear = clear
+    local finalPosition = frame.Position
+    frame.Position = UDim2.new(finalPosition.X.Scale, finalPosition.X.Offset, finalPosition.Y.Scale, finalPosition.Y.Offset + 18)
+    frame.BackgroundTransparency = 1
+    task.defer(function() tween(frame, 0.22, {Position = finalPosition, BackgroundTransparency = 0}) end)
+    applyAdvanced()
+    updateUI()
 end
 
-local function countRoot(entry)
-    local root = entry.Root()
-    if not root then
-        return {Scripts = 0, Remotes = 0, Total = 0}
-    end
-    local scripts = 0
-    local remotes = 0
-    local total = 0
-    local items = {root}
-    local ok, descendants = pcall(function()
-        return root:GetDescendants()
-    end)
-    if ok and type(descendants) == "table" then
-        for _, child in ipairs(descendants) do
-            items[#items + 1] = child
+local function resetDumpState()
+    errors = {}
+    indexRows = {}
+    remoteRows = {}
+    runtimeRows = {Modules = {}, Functions = {}, Tables = {}, NilInstances = {}}
+    fullDumpRows = {}
+    actorRows = {}
+    networkRows = {}
+    networkSummary = {Receive = 0, Send = 0, Dropped = 0, StartedAt = nil, StoppedAt = nil}
+    rejected = {}
+    if type(scanCache.Rejected) == "table" then
+        for reason, count in pairs(scanCache.Rejected) do
+            rejected[reason] = count
         end
     end
-    for index, instance in ipairs(items) do
+    timings = {Capabilities = timings.Capabilities or 0, Scan = timings.Scan or 0, Code = 0, Remotes = 0, Runtime = 0, Actors = 0, Network = 0, Write = 0}
+    usedPaths = {}
+    acceptedScripts = {}
+    acceptedInstances = {}
+    acceptedFunctions = {}
+    linkedTables = {}
+    linkedNil = {}
+    state.Scripts = 0
+    state.Remotes = 0
+    state.Runtime = 0
+    state.Failed = 0
+    state.Processed = 0
+    state.Total = 0
+end
+
+local function discoverByGlobalInstances()
+    local scripts = {}
+    local remotes = {}
+    local seenScripts = {}
+    local seenRemotes = {}
+    local ok, instances = pcall(getinstancesFn)
+    if not ok or type(instances) ~= "table" then
+        return nil, nil
+    end
+    for i, instance in ipairs(instances) do
         if state.Cancelled then
             break
         end
-        local allowed, reason = instanceAllowed(instance, entry, root)
-        if allowed then
-            if isLua(instance) then
-                scripts = scripts + 1
-            elseif isRemote(instance) then
-                remotes = remotes + 1
+        if isLuaContainer(instance) then
+            local descriptor = descriptorFor(instance)
+            if descriptor and not seenScripts[instance] then
+                seenScripts[instance] = true
+                scripts[#scripts + 1] = {Instance = instance, Root = descriptor}
             end
-            total = total + 1
-        else
-            reject(reason)
+        elseif isRemote(instance) then
+            local descriptor = descriptorFor(instance)
+            if descriptor and not seenRemotes[instance] then
+                seenRemotes[instance] = true
+                remotes[#remotes + 1] = {Instance = instance, Root = descriptor}
+            end
         end
-        if index % 800 == 0 then
+        if i % 1500 == 0 then
             task.wait()
         end
     end
-    return {Scripts = scripts, Remotes = remotes, Total = total}
+    return scripts, remotes
+end
+
+local function discoverScriptsFast()
+    local scripts = {}
+    local seen = {}
+    local function addList(fn)
+        if type(fn) ~= "function" then return false end
+        local ok, list = pcall(fn)
+        if not ok or type(list) ~= "table" then return false end
+        for i, instance in ipairs(list) do
+            if state.Cancelled then break end
+            if isLuaContainer(instance) then
+                local descriptor = descriptorFor(instance)
+                if descriptor and not seen[instance] then seen[instance] = true; scripts[#scripts + 1] = {Instance = instance, Root = descriptor} end
+            end
+            if i % 1000 == 0 then task.wait() end
+        end
+        return true
+    end
+    local used = false
+    if Capability.good("getscripts") then used = addList(getscriptsFn) or used end
+    local running = global("getrunningscripts")
+    if Capability.good("getrunningscripts") then used = addList(running) or used end
+    return used and scripts or nil
+end
+
+local function discoverRootDescendants(scripts, remotes, seenScripts, seenRemotes)
+    for _, descriptor in ipairs(rootDescriptors) do
+        if descriptor.Selected and descriptor.Instance then
+            local ok, descendants = pcall(function()
+                return descriptor.Instance:GetDescendants()
+            end)
+            if ok then
+                for i, instance in ipairs(descendants) do
+                    if state.Cancelled then
+                        return
+                    end
+                    local assigned = descriptorFor(instance)
+                    if assigned == descriptor then
+                        if isLuaContainer(instance) and not seenScripts[instance] then
+                            seenScripts[instance] = true
+                            scripts[#scripts + 1] = {Instance = instance, Root = descriptor}
+                        elseif isRemote(instance) and not seenRemotes[instance] then
+                            seenRemotes[instance] = true
+                            remotes[#remotes + 1] = {Instance = instance, Root = descriptor}
+                        end
+                    end
+                    if i % 800 == 0 then
+                        task.wait()
+                    end
+                end
+            else
+                recordError("SCAN", descriptor.Key, descendants)
+            end
+        end
+    end
 end
 
 local function scanStructure()
     if state.Running or state.Scanning then
         return
     end
+    local selectedCount = 0
+    for _, descriptor in ipairs(rootDescriptors) do
+        if descriptor.Selected then
+            selectedCount = selectedCount + 1
+        end
+    end
+    if selectedCount == 0 then
+        state.Message = "Select at least one root"
+        state.Phase = "READY"
+        updateUI()
+        return
+    end
+    local scanStarted = os.clock()
     state.Scanning = true
     state.Cancelled = false
-    state.Phase = "SCANNING STRUCTURE"
-    state.ScanReady = false
-    scanCache = {}
-    resetFilterStats()
-    state.Game = getGameName()
-    state.PlaceId = game.PlaceId
-    setText(ui.gameLine, state.Game .. "  ·  " .. tostring(state.PlaceId) .. "  ·  " .. state.Mode)
+    state.Scanned = false
+    state.Phase = "SCANNING"
+    state.Message = "Indexing selected roots..."
+    resolveRoots()
+    rejected = {}
     updateUI()
-    for _, entry in ipairs(roots) do
-        if state.Cancelled then
-            break
+
+    for _, descriptor in ipairs(rootDescriptors) do
+        descriptor.ScriptCount = descriptor.Selected and 0 or nil
+        descriptor.RemoteCount = descriptor.Selected and 0 or nil
+    end
+
+    local scripts = discoverScriptsFast() or {}
+    local remotes = {}
+    local seenScripts = {}
+    local seenRemotes = {}
+    for _, row in ipairs(scripts) do seenScripts[row.Instance] = true end
+    discoverRootDescendants(scripts, remotes, seenScripts, seenRemotes)
+    if state.Mode == "Deep" and Capability.good("getinstances") and not state.Cancelled then
+        local globalScripts, globalRemotes = discoverByGlobalInstances()
+        for _, row in ipairs(globalScripts or {}) do if not seenScripts[row.Instance] then seenScripts[row.Instance] = true; scripts[#scripts + 1] = row end end
+        for _, row in ipairs(globalRemotes or {}) do if not seenRemotes[row.Instance] then seenRemotes[row.Instance] = true; remotes[#remotes + 1] = row end end
+    end
+
+    if not state.Cancelled then
+        local priority = {ReplicatedStorage = 1, ReplicatedFirst = 2, StarterPlayer = 3, PlayerScripts = 4, StarterGui = 5, PlayerGui = 6, StarterPack = 7, Workspace = 8, Backpack = 9, Character = 10, Lighting = 11, SoundService = 12}
+        table.sort(scripts, function(a, b)
+            local pa = priority[a.Root.Key] or 50
+            local pb = priority[b.Root.Key] or 50
+            if pa ~= pb then return pa < pb end
+            return safeFullName(a.Instance) < safeFullName(b.Instance)
+        end)
+        for _, row in ipairs(scripts) do
+            row.Root.ScriptCount = (row.Root.ScriptCount or 0) + 1
         end
-        scanCache[entry.Id] = countRoot(entry)
-        updateUI()
-        task.wait()
+        for _, row in ipairs(remotes) do
+            row.Root.RemoteCount = (row.Root.RemoteCount or 0) + 1
+        end
+        local scanRejected = {}
+        for reason, count in pairs(rejected) do
+            scanRejected[reason] = count
+        end
+        scanCache = {Scripts = scripts, Remotes = remotes, Counts = {}, Rejected = scanRejected}
+        timings.Scan = os.clock() - scanStarted
+        state.Scanned = true
+        state.Phase = "READY"
+        state.Message = tostring(#scripts) .. " code · " .. tostring(#remotes) .. " remotes ready"
+    else
+        state.Phase = "CANCELLED"
+        state.Message = "Scan cancelled"
+    end
+    if state.Cancelled then
+        timings.Scan = os.clock() - scanStarted
     end
     state.Scanning = false
-    if state.Cancelled then
-        state.Phase = "CANCELLED"
-        state.ScanReady = false
-    else
-        state.Phase = "SELECT"
-        state.ScanReady = true
-    end
     updateUI()
 end
 
-local function clearRunData()
-    state.Code = 0
-    state.Remotes = 0
-    state.Runtime = 0
-    state.Failed = 0
-    state.LastError = nil
-    errors = {}
-    codeIndex = {}
-    remoteIndex = {}
-    runtimeIndex = {Modules = {}, Functions = {}, Tables = {}, NilInstances = {}}
-    fullDumpEntries = {}
-    usedPaths = {}
-    acceptedScripts = {}
-    acceptedInstances = {}
-    acceptedFunctions = {}
-    linkedTables = {}
-    linkedNilInstances = {}
-    resetFilterStats()
+local function sourceFallback(instance)
+    local ok, source = pcall(function()
+        return instance.Source
+    end)
+    if ok and type(source) == "string" and source ~= "" then
+        return source, "Source"
+    end
 end
 
-local function selectedRoots()
-    local result = {}
-    for _, entry in ipairs(roots) do
-        if entry.Selected then
-            local root = entry.Root()
-            if root then
-                result[#result + 1] = {Entry = entry, Root = root}
-            end
-        end
-    end
-    return result
-end
-
-local function discoverSelectedScripts()
-    local scripts = {}
-    local seen = {}
-    for _, selected in ipairs(selectedRoots()) do
-        local entry = selected.Entry
-        local root = selected.Root
-        local items = {root}
-        local ok, descendants = pcall(function()
-            return root:GetDescendants()
-        end)
-        if ok and type(descendants) == "table" then
-            for _, child in ipairs(descendants) do
-                items[#items + 1] = child
-            end
-        end
-        for index, instance in ipairs(items) do
-            if state.Cancelled then
-                return scripts
-            end
-            if isLua(instance) and not seen[instance] then
-                filterStats.ScriptsDiscovered = filterStats.ScriptsDiscovered + 1
-                local allowed, reason = instanceAllowed(instance, entry, root)
-                if allowed then
-                    seen[instance] = true
-                    scripts[#scripts + 1] = {Instance = instance, Entry = entry, Root = root, Reason = reason}
-                    acceptedScripts[instance] = true
-                    acceptedInstances[instance] = true
-                    filterStats.ScriptsAccepted = filterStats.ScriptsAccepted + 1
-                else
-                    reject(reason)
-                end
-            end
-            if index % 700 == 0 then
-                updateUI()
-                task.wait()
-            end
-        end
-    end
-    return scripts
-end
-
-local function readScriptSource(instance)
-    local source
-    local method
-    local decompileError
-    if decompileFn then
-        local ok, result = pcall(decompileFn, instance)
-        if ok and type(result) == "string" and result ~= "" then
-            source = result
-            method = "decompile"
-        else
-            decompileError = result
-        end
-    end
-    if not source then
-        local ok, result = pcall(function()
-            return instance.Source
+local function decompileScript(instance)
+    if decompileFn and Capability.good("decompile") then
+        local ok, result = callWithTimeout(DECOMPILE_TIMEOUT, function()
+            return decompileFn(instance)
         end)
         if ok and type(result) == "string" and result ~= "" then
-            source = result
-            method = "Source"
+            return result, "decompile"
         end
     end
-    return source, method, decompileError
+    return sourceFallback(instance)
 end
 
-local function dumpScript(item)
-    local instance = item.Instance
+local function dumpBytecode(instance, descriptor)
+    if not bytecodeFn or not options.BytecodeFailed or not Capability.good("getscriptbytecode") then
+        return nil
+    end
+    local ok, data = pcall(bytecodeFn, instance)
+    if not ok or type(data) ~= "string" or data == "" then
+        return nil
+    end
+    local path = outputPathFor(instance, descriptor, "bytecode", ".bytecode")
+    local okWrite, err = writeVerified(path, data, true)
+    if not okWrite then
+        recordError("BYTECODE", safeFullName(instance), err)
+        return nil
+    end
+    return path
+end
+
+local function dumpOne(candidate)
+    if state.Cancelled then
+        return
+    end
+    local instance = candidate.Instance
+    local descriptor = candidate.Root
     local fullName = safeFullName(instance)
-    local source, method, decompileError = readScriptSource(instance)
+    local started = os.clock()
+    local source, method = decompileScript(instance)
     local row = {
         Name = safeString(instance.Name),
         Class = safeClass(instance),
         FullName = fullName,
-        SelectedRoot = item.Entry.Id,
-        Origin = item.Entry.Group,
-        ReasonAccepted = item.Reason,
+        Root = descriptor.Key,
+        Origin = descriptor.Group,
         Method = method or "none",
+        Status = "FAILED",
         File = nil,
         Bytecode = nil,
-        Status = "FAILED"
+        Size = 0,
+        Hash = nil,
+        ElapsedMs = 0
     }
+    local getscripthash = global("getscripthash")
+    if getscripthash and Capability.good("getscripthash") then
+        local okHash, scriptHash = pcall(getscripthash, instance)
+        if okHash and type(scriptHash) == "string" then row.Hash = scriptHash end
+    end
     if source then
-        local path = outputPath("code", item.Entry, item.Root, instance, ".luau")
-        local ok, err = writeVerified(path, source)
-        if ok then
+        local path = outputPathFor(instance, descriptor, "code", ".luau")
+        local okWrite, err = writeVerified(path, source, false)
+        if okWrite then
+            row.Status = method == "decompile" and "DECOMPILED" or "SOURCE"
             row.File = path
-            row.Status = "OK"
-            state.Code = state.Code + 1
+            row.Size = #source
+            state.Scripts = state.Scripts + 1
+            acceptedScripts[instance] = candidate
+            acceptedInstances[instance] = true
             if options.FullDump then
-                fullDumpEntries[#fullDumpEntries + 1] = {
-                    Path = fullName,
-                    Root = item.Entry.Id,
-                    Class = safeClass(instance),
+                fullDumpRows[#fullDumpRows + 1] = {
+                    FullName = fullName,
+                    Root = descriptor.Key,
                     Source = source
                 }
             end
@@ -1432,154 +2081,223 @@ local function dumpScript(item)
             recordError("WRITE_CODE", fullName, err)
         end
     end
-    if options.Bytecode and bytecodeFn then
-        local okByte, bytecode = pcall(bytecodeFn, instance)
-        if okByte and type(bytecode) == "string" and bytecode ~= "" then
-            local path = outputPath("bytecode", item.Entry, item.Root, instance, ".bytecode")
-            local okWrite, errWrite = writeVerified(path, bytecode)
-            if okWrite then
-                row.Bytecode = path
-                if row.Status ~= "OK" then
-                    row.Status = "BYTECODE_ONLY"
-                    state.Code = state.Code + 1
-                end
-            else
-                recordError("WRITE_BYTECODE", fullName, errWrite)
-            end
+    if row.Status == "FAILED" then
+        local bytecodePath = dumpBytecode(instance, descriptor)
+        if bytecodePath then
+            row.Status = "BYTECODE_ONLY"
+            row.Bytecode = bytecodePath
+            state.Scripts = state.Scripts + 1
+            acceptedScripts[instance] = candidate
+            acceptedInstances[instance] = true
+        else
+            recordError("DECOMPILE", fullName, "no readable source or bytecode")
         end
     end
-    if row.Status == "FAILED" then
-        recordError("DECOMPILE", fullName, decompileError or "no readable source")
-    end
-    codeIndex[#codeIndex + 1] = row
+    row.ElapsedMs = math.floor((os.clock() - started) * 1000)
+    indexRows[#indexRows + 1] = row
 end
 
-local function collectSelectedRemotes()
-    if not options.Remotes then
+local function workerCount(total)
+    local override = tonumber(env.AnyDumper_Workers)
+    if override then
+        override = math.floor(override)
+        if override >= 1 and override <= 12 then
+            return math.min(override, math.max(1, total))
+        end
+    end
+    local verifiedDecompiler = Capability.verified("decompile")
+    local verifiedBytecode = Capability.verified("getscriptbytecode")
+    local base = verifiedDecompiler and DEFAULT_WORKERS or (verifiedBytecode and 5 or 3)
+    if total <= 24 then return math.min(verifiedDecompiler and 4 or 2, total) end
+    if total >= 900 then return math.min(verifiedDecompiler and 10 or 6, total) end
+    if total >= 400 then return math.min(verifiedDecompiler and 8 or 5, total) end
+    return math.min(base, total)
+end
+
+local function dumpScripts()
+    local started = os.clock()
+    state.Phase = "DECOMPILING"
+    state.Total = #scanCache.Scripts
+    state.Processed = 0
+    updateUI()
+    if state.Total == 0 then
         return
     end
-    local seen = {}
-    for _, selected in ipairs(selectedRoots()) do
-        local entry = selected.Entry
-        local root = selected.Root
-        local items = {root}
-        local ok, descendants = pcall(function()
-            return root:GetDescendants()
-        end)
-        if ok and type(descendants) == "table" then
-            for _, child in ipairs(descendants) do
-                items[#items + 1] = child
-            end
-        end
-        for index, instance in ipairs(items) do
-            if state.Cancelled then
-                return
-            end
-            if isRemote(instance) and not seen[instance] then
-                filterStats.RemotesDiscovered = filterStats.RemotesDiscovered + 1
-                local allowed, reason = instanceAllowed(instance, entry, root)
-                if allowed then
-                    seen[instance] = true
-                    acceptedInstances[instance] = true
-                    local row = {
-                        Name = safeString(instance.Name),
-                        Class = safeClass(instance),
-                        FullName = safeFullName(instance),
-                        SelectedRoot = entry.Id,
-                        ReasonAccepted = reason,
-                        Attributes = {},
-                        ClientConnections = nil,
-                        HasClientInvoke = nil
-                    }
-                    pcall(function()
-                        row.Attributes = jsonSafe(instance:GetAttributes()) or {}
-                    end)
-                    if getconnectionsFn and safeClass(instance) ~= "RemoteFunction" then
-                        local okConnections, connections = pcall(function()
-                            return getconnectionsFn(instance.OnClientEvent)
-                        end)
-                        if okConnections and type(connections) == "table" then
-                            row.ClientConnections = #connections
-                        end
-                    elseif safeClass(instance) == "RemoteFunction" then
-                        pcall(function()
-                            row.HasClientInvoke = instance.OnClientInvoke ~= nil
-                        end)
-                    end
-                    remoteIndex[#remoteIndex + 1] = row
-                    state.Remotes = state.Remotes + 1
-                    filterStats.RemotesAccepted = filterStats.RemotesAccepted + 1
-                else
-                    reject(reason)
+    local cursor = 0
+    local completedWorkers = 0
+    local workers = workerCount(state.Total)
+    for _ = 1, workers do
+        task.spawn(function()
+            while not state.Cancelled do
+                cursor = cursor + 1
+                local index = cursor
+                local candidate = scanCache.Scripts[index]
+                if not candidate then
+                    break
+                end
+                dumpOne(candidate)
+                state.Processed = state.Processed + 1
+                if state.Processed % 4 == 0 or state.Processed == state.Total then
+                    updateUI()
+                    task.wait()
                 end
             end
-            if index % 700 == 0 then
-                updateUI()
-                task.wait()
-            end
-        end
+            completedWorkers = completedWorkers + 1
+        end)
     end
+    while completedWorkers < workers do
+        task.wait(0.05)
+    end
+    timings.Code = os.clock() - started
 end
 
-local function buildAcceptedSourceSet()
-    local set = {}
-    for instance in pairs(acceptedScripts) do
-        local full = normalizeSource(safeFullName(instance))
-        if full ~= "" then
-            set[full] = true
-            set["game." .. full] = true
+local function dumpRemotes()
+    if not options.Remotes or state.Cancelled then
+        return
+    end
+    local started = os.clock()
+    state.Phase = "REMOTES"
+    state.Total = #scanCache.Remotes
+    state.Processed = 0
+    updateUI()
+    for i, candidate in ipairs(scanCache.Remotes) do
+        if state.Cancelled then
+            break
         end
-    end
-    return set
-end
-
-local function sourceLinked(source, set)
-    local rejected, rejectReason = sourceRejected(source)
-    if rejected then
-        return false, rejectReason
-    end
-    local normalized = normalizeSource(source)
-    if normalized == "" then
-        return false, "NoSource"
-    end
-    if set[normalized] then
-        return true, "AcceptedSource"
-    end
-    for token in pairs(set) do
-        if #token >= 8 and normalized:find(token, 1, true) then
-            return true, "AcceptedSourcePath"
-        end
-    end
-    if state.Mode == "Deep" then
-        local prefixes = {
-            "replicatedstorage.",
-            "replicatedfirst.",
-            "workspace.",
-            "starterplayer.",
-            "startergui.",
-            "starterpack.",
-            "lighting.",
-            "soundservice."
+        local instance = candidate.Instance
+        local row = {
+            Name = safeString(instance.Name),
+            Class = safeClass(instance),
+            FullName = safeFullName(instance),
+            Root = candidate.Root.Key,
+            Attributes = {},
+            ClientConnections = nil,
+            HasClientInvoke = nil
         }
-        for _, prefix in ipairs(prefixes) do
-            if normalized:find(prefix, 1, true) == 1 then
-                return true, "DeepSource"
-            end
+        pcall(function()
+            row.Attributes = instance:GetAttributes()
+        end)
+        local class = row.Class
+        if class == "RemoteFunction" then
+            pcall(function()
+                row.HasClientInvoke = instance.OnClientInvoke ~= nil
+            end)
+        elseif getconnectionsFn then
+            pcall(function()
+                local connections = getconnectionsFn(instance.OnClientEvent)
+                if type(connections) == "table" then
+                    row.ClientConnections = #connections
+                end
+            end)
+        end
+        remoteRows[#remoteRows + 1] = row
+        acceptedInstances[instance] = true
+        state.Remotes = state.Remotes + 1
+        state.Processed = i
+        if i % 30 == 0 then
+            updateUI()
+            task.wait()
         end
     end
-    return false, "UnlinkedSource"
+    timings.Remotes = os.clock() - started
+end
+
+
+function Network.capture(direction, packet)
+    if not Network.Active then return end
+    if #networkRows >= MAX_NETWORK_EVENTS then networkSummary.Dropped = networkSummary.Dropped + 1; return end
+    local function field(namesList)
+        for _, name in ipairs(namesList) do
+            local ok, value = pcall(function() return packet[name] end)
+            if ok and value ~= nil then return value end
+        end
+    end
+    local data = field({"Data", "data", "Payload", "payload"})
+    local size = field({"Size", "Length", "size", "length"})
+    if size == nil then
+        local kind = typeof and typeof(data) or type(data)
+        if kind == "string" then size = #data
+        elseif kind == "buffer" and type(buffer) == "table" and type(buffer.len) == "function" then pcall(function() size = buffer.len(data) end) end
+    end
+    networkRows[#networkRows + 1] = jsonSafe({Direction = direction, At = os.clock(), Id = field({"Id", "ID", "PacketId", "PacketID", "id"}), Priority = field({"Priority", "priority"}), Reliability = field({"Reliability", "reliability"}), OrderingChannel = field({"OrderingChannel", "orderingChannel", "Channel", "channel"}), Size = size, Kind = typeof and typeof(packet) or type(packet)})
+    if direction == "receive" then networkSummary.Receive = networkSummary.Receive + 1 else networkSummary.Send = networkSummary.Send + 1 end
+end
+
+function Network.start()
+    networkRows = {}
+    networkSummary = {Receive = 0, Send = 0, Dropped = 0, StartedAt = os.clock(), StoppedAt = nil}
+    Network.Active = false
+    Network.Receive, Network.Send, Network.ReceiveConnection, Network.SendConnection = nil, nil, nil, nil
+    if not options.NetworkTrace then return false end
+    local raknet = global("raknet") or global("RakNet")
+    if type(raknet) ~= "table" then return false end
+    local started = false
+    local addReceive = Capability.raknetFunction("add_receive_hook")
+    if addReceive and Capability.good("raknet.add_receive_hook") then
+        local callback = function(packet) Network.capture("receive", packet) end
+        local ok, token = pcall(addReceive, callback)
+        if ok then Network.Receive = token or callback; started = true else recordError("NETWORK", "add_receive_hook", token) end
+    else
+        local signal; pcall(function() signal = raknet.OnPacketReceive end)
+        if signal then local ok, connection = pcall(function() return signal:Connect(function(packet) Network.capture("receive", packet) end) end); if ok then Network.ReceiveConnection = connection; started = true end end
+    end
+    local addSend = Capability.raknetFunction("add_send_hook")
+    if addSend and Capability.good("raknet.add_send_hook") then
+        local callback = function(packet) Network.capture("send", packet) end
+        local ok, token = pcall(addSend, callback)
+        if ok then Network.Send = token or callback; started = true else recordError("NETWORK", "add_send_hook", token) end
+    else
+        local signal; pcall(function() signal = raknet.OnPacketSend end)
+        if signal then local ok, connection = pcall(function() return signal:Connect(function(packet) Network.capture("send", packet) end) end); if ok then Network.SendConnection = connection; started = true end end
+    end
+    Network.Active = started
+    return started
+end
+
+function Network.stop()
+    if not Network.Active then return end
+    Network.Active = false
+    local removeReceive = Capability.raknetFunction("remove_receive_hook")
+    if removeReceive and Network.Receive then pcall(removeReceive, Network.Receive) end
+    local removeSend = Capability.raknetFunction("remove_send_hook")
+    if removeSend and Network.Send then pcall(removeSend, Network.Send) end
+    if Network.ReceiveConnection then pcall(function() Network.ReceiveConnection:Disconnect() end) end
+    if Network.SendConnection then pcall(function() Network.SendConnection:Disconnect() end) end
+    networkSummary.StoppedAt = os.clock()
+    if networkSummary.StartedAt then timings.Network = networkSummary.StoppedAt - networkSummary.StartedAt end
+end
+
+function Actor.collect()
+    if not options.ActorScan or state.Cancelled or not Capability.good("getactors") then return end
+    local getactors = global("getactors")
+    if not getactors then return end
+    local started = os.clock()
+    state.Phase = "ACTORS"
+    updateUI()
+    local ok, actors = pcall(getactors)
+    if not ok or type(actors) ~= "table" then recordError("ACTORS", "getactors", actors); return end
+    local getactorthreads = global("getactorthreads")
+    local getcurrentactor = global("getcurrentactor")
+    for _, actor in ipairs(actors) do
+        if state.Cancelled then break end
+        local descriptor = descriptorFor(actor)
+        if descriptor then
+            local row = {Name = safeString(actor.Name), FullName = safeFullName(actor), Root = descriptor.Key, Threads = nil, Current = false}
+            if getactorthreads and Capability.good("getactorthreads") then local okT, threads = pcall(getactorthreads, actor); if okT and type(threads) == "table" then row.Threads = #threads end end
+            if getcurrentactor and Capability.good("getcurrentactor") then local okC, current = pcall(getcurrentactor); if okC then row.Current = current == actor end end
+            actorRows[#actorRows + 1] = row
+            state.Runtime = state.Runtime + 1
+        else recordReject("ActorOutsideSelectedRoots") end
+    end
+    timings.Actors = os.clock() - started
 end
 
 local function functionInfo(fn)
-    local row = {Name = nil, Source = nil, Arity = nil, Vararg = nil, Constants = nil, UpvalueCount = nil, Owner = nil, Ownership = nil}
+    local row = {Name = nil, Source = nil, Arity = nil, Vararg = nil, Constants = nil, UpvalueCount = nil}
     if caps.debugInfo then
         pcall(function()
             row.Name = debug.info(fn, "n")
-        end)
-        pcall(function()
             row.Source = debug.info(fn, "s")
-        end)
-        pcall(function()
             local arity, vararg = debug.info(fn, "a")
             row.Arity = arity
             row.Vararg = vararg
@@ -1588,20 +2306,20 @@ local function functionInfo(fn)
     if getconstantsFn then
         local ok, constants = pcall(getconstantsFn, fn)
         if ok and type(constants) == "table" then
-            local interesting = {}
+            local keep = {}
             for _, value in ipairs(constants) do
                 if type(value) == "string" then
                     local lower = string.lower(value)
-                    if lower:find("remote", 1, true) or lower:find("invoke", 1, true) or lower:find("fire", 1, true) or lower:find("network", 1, true) or lower:find("replica", 1, true) or lower:find("packet", 1, true) then
-                        interesting[#interesting + 1] = value
-                        if #interesting >= 20 then
+                    if lower:find("remote", 1, true) or lower:find("invoke", 1, true) or lower:find("fire", 1, true) or lower:find("network", 1, true) or lower:find("packet", 1, true) or lower:find("replica", 1, true) then
+                        keep[#keep + 1] = value
+                        if #keep >= 20 then
                             break
                         end
                     end
                 end
             end
-            if #interesting > 0 then
-                row.Constants = interesting
+            if #keep > 0 then
+                row.Constants = keep
             end
         end
     end
@@ -1618,50 +2336,32 @@ local function functionInfo(fn)
     return row
 end
 
-local function envScript(fn)
-    if not getfenvFn then
-        return nil
+local function captureTable(tbl, link)
+    if linkedTables[tbl] or #runtimeRows.Tables >= MAX_RUNTIME_TABLES then
+        return
     end
-    local ok, environment = pcall(getfenvFn, fn)
-    if not ok or type(environment) ~= "table" then
-        return nil
-    end
-    local scriptValue
-    pcall(function()
-        scriptValue = rawget(environment, "script") or environment.script
-    end)
-    if (typeof and typeof(scriptValue) or type(scriptValue)) == "Instance" then
-        return scriptValue
-    end
-end
-
-local function functionOwnership(fn, info, sourceSet)
-    if isExecutorClosure(fn) then
-        return false, "ExecutorClosure", nil
-    end
-    local scriptValue = envScript(fn)
-    if scriptValue then
-        if acceptedScripts[scriptValue] then
-            return true, "EnvScript", safeFullName(scriptValue)
-        end
-        local entry, root = rootForInstance(scriptValue)
-        if entry and entry.Selected and root then
-            local allowed, reason = instanceAllowed(scriptValue, entry, root)
-            if allowed and isLua(scriptValue) then
-                return true, "EnvScript:" .. reason, safeFullName(scriptValue)
+    linkedTables[tbl] = link
+    local keys = {}
+    local count = 0
+    local ok = pcall(function()
+        for key in next, tbl do
+            count = count + 1
+            if #keys < MAX_RUNTIME_KEYS then
+                keys[#keys + 1] = safeString(key)
+            end
+            if count >= 160 then
+                break
             end
         end
-        return false, "ForeignEnvScript", safeFullName(scriptValue)
+    end)
+    if ok then
+        runtimeRows.Tables[#runtimeRows.Tables + 1] = {Link = link, Keys = keys}
+        state.Runtime = state.Runtime + 1
     end
-    local linked, reason = sourceLinked(info.Source, sourceSet)
-    if linked then
-        return true, reason, safeString(info.Source)
-    end
-    return false, reason, safeString(info.Source)
 end
 
-local function linkUpvalues(fn)
-    if not getupvaluesFn then
+local function captureUpvalues(fn, owner)
+    if not getupvaluesFn or not Capability.good("getupvalues") then
         return
     end
     local ok, values = pcall(getupvaluesFn, fn)
@@ -1671,234 +2371,212 @@ local function linkUpvalues(fn)
     for _, value in pairs(values) do
         local kind = typeof and typeof(value) or type(value)
         if kind == "table" then
-            linkedTables[value] = linkedTables[value] or "AcceptedFunctionUpvalue"
-        elseif kind == "Instance" and not safeParent(value) then
-            linkedNilInstances[value] = linkedNilInstances[value] or "AcceptedFunctionUpvalue"
+            captureTable(value, "Upvalue:" .. owner)
+        elseif kind == "function" and #runtimeRows.Functions < MAX_RUNTIME_FUNCTIONS and not isExecutorClosure(value) and not acceptedFunctions[value] then
+            acceptedFunctions[value] = true
+            local info = functionInfo(value)
+            info.Owner = owner
+            info.Ownership = "UpvalueFunction"
+            runtimeRows.Functions[#runtimeRows.Functions + 1] = info
+            state.Runtime = state.Runtime + 1
+        elseif kind == "Instance" and safeParent(value) == nil then
+            linkedNil[value] = "Upvalue:" .. owner
         end
     end
 end
 
-local function tableKeys(tbl)
-    local keys = {}
-    local count = 0
-    pcall(function()
-        for key in next, tbl do
-            count = count + 1
-            if #keys < 40 then
-                keys[#keys + 1] = safeString(key)
-            end
-            if count >= 100 then
-                break
-            end
-        end
-    end)
-    return keys
-end
-
-local function tableLinked(tbl)
-    if linkedTables[tbl] then
-        return true, linkedTables[tbl]
-    end
-    local reason
-    local scanned = 0
-    pcall(function()
-        for key, value in next, tbl do
-            scanned = scanned + 1
-            for _, candidate in ipairs({key, value}) do
-                local kind = typeof and typeof(candidate) or type(candidate)
-                if kind == "Instance" and acceptedInstances[candidate] then
-                    reason = "AcceptedInstance"
-                    break
-                end
-                if kind == "function" and acceptedFunctions[candidate] then
-                    reason = "AcceptedFunction"
-                    break
-                end
-                if kind == "table" and linkedTables[candidate] then
-                    reason = "LinkedTable"
-                    break
-                end
-            end
-            if reason or scanned >= 80 then
-                break
-            end
-        end
-    end)
-    return reason ~= nil, reason or "UnlinkedTable"
-end
-
-local function collectRuntime()
-    if not options.RuntimeLinked or state.Mode == "Strict" then
-        return
-    end
-
-    local selectedSet = {}
-    for instance in pairs(acceptedScripts) do
-        selectedSet[instance] = true
-    end
-
-    if getloadedmodulesFn then
-        local ok, modules = pcall(getloadedmodulesFn)
-        if ok and type(modules) == "table" then
-            for _, module in ipairs(modules) do
-                if state.Cancelled then
-                    return
-                end
-                filterStats.ModulesDiscovered = filterStats.ModulesDiscovered + 1
-                local entry, root = rootForInstance(module)
-                if entry and entry.Selected and root then
-                    local allowed, reason = instanceAllowed(module, entry, root)
-                    if allowed then
-                        runtimeIndex.Modules[#runtimeIndex.Modules + 1] = {
-                            Name = safeString(module.Name),
-                            FullName = safeFullName(module),
-                            SelectedRoot = entry.Id,
-                            ReasonAccepted = reason
-                        }
-                        acceptedInstances[module] = true
-                        filterStats.ModulesAccepted = filterStats.ModulesAccepted + 1
-                        state.Runtime = state.Runtime + 1
-                    else
-                        reject(reason)
-                    end
-                else
-                    reject("ModuleOutsideSelection")
-                end
-            end
-        else
-            recordError("RUNTIME", "getloadedmodules", modules)
-        end
-    end
-
-    for scriptInstance in pairs(selectedSet) do
+local function directRuntime()
+    for instance, candidate in pairs(acceptedScripts) do
         if state.Cancelled then
             return
         end
-        if getsenvFn then
-            local ok, environment = pcall(getsenvFn, scriptInstance)
-            if ok and type(environment) == "table" then
-                linkedTables[environment] = linkedTables[environment] or "ScriptEnvironment"
+        local owner = safeFullName(instance)
+        if getsenvFn and Capability.good("getsenv") then
+            local ok, scriptEnv = pcall(getsenvFn, instance)
+            if ok and type(scriptEnv) == "table" then
+                captureTable(scriptEnv, "Environment:" .. owner)
             end
         end
         local closure
-        if getscriptclosureFn then
-            local ok, result = pcall(getscriptclosureFn, scriptInstance)
+        if getscriptclosureFn and Capability.good("getscriptclosure") then
+            local ok, result = pcall(getscriptclosureFn, instance)
             if ok and type(result) == "function" then
                 closure = result
             end
         end
-        if not closure and getscriptfunctionFn then
-            local ok, result = pcall(getscriptfunctionFn, scriptInstance)
+        if not closure and getscriptfunctionFn and Capability.good("getscriptfunction") then
+            local ok, result = pcall(getscriptfunctionFn, instance)
             if ok and type(result) == "function" then
                 closure = result
             end
         end
-        if closure and not acceptedFunctions[closure] and not isExecutorClosure(closure) then
-            local info = functionInfo(closure)
-            info.Owner = safeFullName(scriptInstance)
-            info.Ownership = "DirectScriptClosure"
-            runtimeIndex.Functions[#runtimeIndex.Functions + 1] = info
+        if closure and not acceptedFunctions[closure] then
             acceptedFunctions[closure] = true
-            filterStats.RuntimeFunctionsAccepted = filterStats.RuntimeFunctionsAccepted + 1
+            local info = functionInfo(closure)
+            info.Owner = owner
+            info.Root = candidate.Root.Key
+            info.Ownership = "DirectScriptClosure"
+            runtimeRows.Functions[#runtimeRows.Functions + 1] = info
             state.Runtime = state.Runtime + 1
-            linkUpvalues(closure)
+            captureUpvalues(closure, owner)
         end
     end
+end
 
-    if getgcFn then
-        local sourceSet = buildAcceptedSourceSet()
-        local ok, objects = pcall(getgcFn, true)
-        if ok and type(objects) == "table" then
-            local functionScanLimit = state.Mode == "Deep" and 24000 or 12000
-            local tableScanLimit = state.Mode == "Deep" and 28000 or 14000
-            local functionAcceptedLimit = state.Mode == "Deep" and 5000 or 2500
-            local tableAcceptedLimit = state.Mode == "Deep" and 2400 or 1000
-            local functionScanned = 0
-            local functionAccepted = 0
-            for index, object in ipairs(objects) do
-                if state.Cancelled then
-                    return
-                end
-                if type(object) == "function" and not acceptedFunctions[object] and functionScanned < functionScanLimit and functionAccepted < functionAcceptedLimit then
-                    functionScanned = functionScanned + 1
-                    filterStats.RuntimeFunctionsScanned = filterStats.RuntimeFunctionsScanned + 1
-                    local info = functionInfo(object)
-                    local owned, ownership, owner = functionOwnership(object, info, sourceSet)
-                    if owned then
-                        info.Owner = owner
-                        info.Ownership = ownership
-                        runtimeIndex.Functions[#runtimeIndex.Functions + 1] = info
-                        acceptedFunctions[object] = true
-                        filterStats.RuntimeFunctionsAccepted = filterStats.RuntimeFunctionsAccepted + 1
-                        functionAccepted = functionAccepted + 1
-                        state.Runtime = state.Runtime + 1
-                        linkUpvalues(object)
-                    else
-                        reject(ownership)
-                    end
-                end
-                if index % 1300 == 0 then
-                    updateUI()
-                    task.wait()
-                end
-            end
-
-            local tableScanned = 0
-            local tableAccepted = 0
-            for index, object in ipairs(objects) do
-                if state.Cancelled then
-                    return
-                end
-                if type(object) == "table" and tableScanned < tableScanLimit and tableAccepted < tableAcceptedLimit then
-                    tableScanned = tableScanned + 1
-                    filterStats.RuntimeTablesScanned = filterStats.RuntimeTablesScanned + 1
-                    local linked, reason = tableLinked(object)
-                    if linked then
-                        runtimeIndex.Tables[#runtimeIndex.Tables + 1] = {Keys = tableKeys(object), Link = reason}
-                        linkedTables[object] = linkedTables[object] or reason
-                        filterStats.RuntimeTablesAccepted = filterStats.RuntimeTablesAccepted + 1
-                        tableAccepted = tableAccepted + 1
-                        state.Runtime = state.Runtime + 1
-                    else
-                        reject(reason)
-                    end
-                end
-                if index % 1300 == 0 then
-                    updateUI()
-                    task.wait()
-                end
-            end
-        else
-            recordError("RUNTIME", "getgc", objects)
+local function moduleRuntime()
+    if not getloadedmodulesFn or not Capability.good("getloadedmodules") then
+        return
+    end
+    local ok, modules = pcall(getloadedmodulesFn)
+    if not ok or type(modules) ~= "table" then
+        recordError("RUNTIME", "getloadedmodules", modules)
+        return
+    end
+    for _, module in ipairs(modules) do
+        if state.Cancelled then
+            return
+        end
+        local descriptor = descriptorFor(module)
+        if descriptor then
+            runtimeRows.Modules[#runtimeRows.Modules + 1] = {
+                Name = safeString(module.Name),
+                FullName = safeFullName(module),
+                Root = descriptor.Key
+            }
+            acceptedInstances[module] = true
+            state.Runtime = state.Runtime + 1
         end
     end
+end
 
-    if options.LinkedNil and getnilinstancesFn then
-        local ok, nils = pcall(getnilinstancesFn)
-        if ok and type(nils) == "table" then
-            for _, instance in ipairs(nils) do
-                if state.Cancelled then
-                    return
-                end
-                if isLua(instance) or isRemote(instance) then
-                    filterStats.NilDiscovered = filterStats.NilDiscovered + 1
-                    if linkedNilInstances[instance] then
-                        runtimeIndex.NilInstances[#runtimeIndex.NilInstances + 1] = {
-                            Name = safeString(instance.Name),
-                            Class = safeClass(instance),
-                            Link = linkedNilInstances[instance]
-                        }
-                        filterStats.NilAccepted = filterStats.NilAccepted + 1
-                        state.Runtime = state.Runtime + 1
-                    else
-                        reject("NilUnlinked")
-                    end
-                end
-            end
-        else
-            recordError("RUNTIME", "getnilinstances", nils)
+local acceptedSourceSet = {}
+
+local function rebuildAcceptedSourceSet()
+    acceptedSourceSet = {}
+    for instance in pairs(acceptedScripts) do
+        local full = string.lower(safeFullName(instance)):gsub("\\", "/"):gsub("/", ".")
+        if full ~= "" then
+            acceptedSourceSet[full] = true
+            acceptedSourceSet["game." .. full] = true
         end
     end
+end
+
+local function sourceMatchesAccepted(source)
+    local normalized = string.lower(safeString(source or "")):gsub("^[@=]", ""):gsub("\\", "/"):gsub("/", "."):gsub("%s+", "")
+    return acceptedSourceSet[normalized] == true
+end
+
+local function envScriptFor(fn)
+    if not getfenvFn or not Capability.good("getfenv") then
+        return nil
+    end
+    local ok, functionEnv = pcall(getfenvFn, fn)
+    if not ok or type(functionEnv) ~= "table" then
+        return nil
+    end
+    local scriptValue
+    pcall(function()
+        scriptValue = rawget(functionEnv, "script") or functionEnv.script
+    end)
+    if (typeof and typeof(scriptValue) or type(scriptValue)) == "Instance" then
+        return scriptValue
+    end
+end
+
+local function deepRuntime()
+    if state.Mode ~= "Deep" or not getgcFn or not Capability.good("getgc") or state.Cancelled then
+        return
+    end
+    rebuildAcceptedSourceSet()
+    local ok, objects = pcall(getgcFn, true)
+    if not ok or type(objects) ~= "table" then
+        recordError("RUNTIME", "getgc", objects)
+        return
+    end
+    local limit = math.min(#objects, MAX_DEEP_RUNTIME_FUNCTIONS)
+    state.Total = limit
+    state.Processed = 0
+    for i = 1, limit do
+        if state.Cancelled then
+            return
+        end
+        local object = objects[i]
+        if type(object) == "function" and not acceptedFunctions[object] and not isExecutorClosure(object) then
+            local linked = false
+            local owner = ""
+            local scriptValue = envScriptFor(object)
+            if scriptValue and acceptedScripts[scriptValue] then
+                linked = true
+                owner = safeFullName(scriptValue)
+            elseif caps.debugInfo then
+                local source
+                pcall(function()
+                    source = debug.info(object, "s")
+                end)
+                if sourceMatchesAccepted(source) then
+                    linked = true
+                    owner = safeString(source)
+                end
+            end
+            if linked then
+                acceptedFunctions[object] = true
+                local info = functionInfo(object)
+                info.Owner = owner
+                info.Ownership = "DeepLinked"
+                runtimeRows.Functions[#runtimeRows.Functions + 1] = info
+                state.Runtime = state.Runtime + 1
+                captureUpvalues(object, owner)
+            end
+        end
+        state.Processed = i
+        if i % 1200 == 0 then
+            updateUI()
+            task.wait()
+        end
+    end
+end
+
+local function linkedNilRuntime()
+    if not options.LinkedNil or state.Mode ~= "Deep" or not getnilinstancesFn or not Capability.good("getnilinstances") or state.Cancelled then
+        return
+    end
+    local ok, instances = pcall(getnilinstancesFn)
+    if not ok or type(instances) ~= "table" then
+        recordError("RUNTIME", "getnilinstances", instances)
+        return
+    end
+    for _, instance in ipairs(instances) do
+        if state.Cancelled then
+            return
+        end
+        if linkedNil[instance] then
+            runtimeRows.NilInstances[#runtimeRows.NilInstances + 1] = {
+                Name = safeString(instance.Name),
+                Class = safeClass(instance),
+                Link = linkedNil[instance]
+            }
+            state.Runtime = state.Runtime + 1
+        end
+    end
+end
+
+local function collectRuntime()
+    if not options.Runtime or state.Mode == "Strict" or state.Cancelled then
+        return
+    end
+    local started = os.clock()
+    state.Phase = "RUNTIME"
+    state.Total = math.max(1, #scanCache.Scripts)
+    state.Processed = 0
+    updateUI()
+    moduleRuntime()
+    directRuntime()
+    if state.Mode == "Deep" then
+        deepRuntime()
+        linkedNilRuntime()
+    end
+    timings.Runtime = os.clock() - started
 end
 
 local function buildFilterReport()
@@ -1907,23 +2585,23 @@ local function buildFilterReport()
         "credit: any ne",
         "mode: " .. state.Mode,
         "",
-        "scripts discovered: " .. tostring(filterStats.ScriptsDiscovered),
-        "scripts accepted: " .. tostring(filterStats.ScriptsAccepted),
-        "remotes discovered: " .. tostring(filterStats.RemotesDiscovered),
-        "remotes accepted: " .. tostring(filterStats.RemotesAccepted),
-        "modules discovered: " .. tostring(filterStats.ModulesDiscovered),
-        "modules accepted: " .. tostring(filterStats.ModulesAccepted),
-        "runtime functions scanned: " .. tostring(filterStats.RuntimeFunctionsScanned),
-        "runtime functions accepted: " .. tostring(filterStats.RuntimeFunctionsAccepted),
-        "runtime tables scanned: " .. tostring(filterStats.RuntimeTablesScanned),
-        "runtime tables accepted: " .. tostring(filterStats.RuntimeTablesAccepted),
-        "nil discovered: " .. tostring(filterStats.NilDiscovered),
-        "nil accepted: " .. tostring(filterStats.NilAccepted),
-        "",
-        "rejected:"
+        "selected roots:"
     }
+    for _, descriptor in ipairs(rootDescriptors) do
+        if descriptor.Selected then
+            lines[#lines + 1] = descriptor.Key .. ": " .. tostring(descriptor.ScriptCount or 0) .. " code, " .. tostring(descriptor.RemoteCount or 0) .. " remotes"
+        end
+    end
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = "capabilities:"
+    lines[#lines + 1] = "verified: " .. tostring((capProfile.Summary and capProfile.Summary.Verified) or 0) .. "/" .. tostring((capProfile.Summary and capProfile.Summary.Total) or 0)
+    lines[#lines + 1] = "actors: " .. tostring(#actorRows)
+    lines[#lines + 1] = "network receive: " .. tostring(networkSummary.Receive or 0)
+    lines[#lines + 1] = "network send: " .. tostring(networkSummary.Send or 0)
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = "rejected:"
     local keys = {}
-    for reason in pairs(filterStats.Rejected) do
+    for reason in pairs(rejected) do
         keys[#keys + 1] = reason
     end
     table.sort(keys)
@@ -1931,7 +2609,7 @@ local function buildFilterReport()
         lines[#lines + 1] = "none"
     else
         for _, reason in ipairs(keys) do
-            lines[#lines + 1] = reason .. ": " .. tostring(filterStats.Rejected[reason])
+            lines[#lines + 1] = reason .. ": " .. tostring(rejected[reason])
         end
     end
     return table.concat(lines, "\n")
@@ -1942,264 +2620,227 @@ local function buildErrorLog()
         return "No errors recorded."
     end
     local lines = {}
-    for index, row in ipairs(errors) do
-        lines[#lines + 1] = "[" .. tostring(index) .. "] " .. row.Scope .. " | " .. row.Target .. " | " .. row.Error
+    for i, row in ipairs(errors) do
+        lines[#lines + 1] = string.format("[%d] %s | %s | %s", i, row.Scope, row.Target, row.Error)
     end
     return table.concat(lines, "\n")
 end
 
-local function buildFullDump()
-    local parts = {"return {"}
-    for _, entry in ipairs(fullDumpEntries) do
-        parts[#parts + 1] = "{Path=" .. luaQuote(entry.Path) .. ",Root=" .. luaQuote(entry.Root) .. ",Class=" .. luaQuote(entry.Class) .. ",Source=" .. longQuote(entry.Source) .. "},"
-    end
-    parts[#parts + 1] = "}"
-    return table.concat(parts, "\n")
-end
-
-local function buildCapabilities()
-    local result = {mode = state.Mode, executor = getExecutorName()}
-    for _, name in ipairs(capNames) do
-        result[name] = caps[name] == true
-    end
-    result.debugInfo = caps.debugInfo == true
-    return result
-end
-
-local function selectedRootManifest()
-    local result = {}
-    for _, entry in ipairs(roots) do
-        if entry.Selected then
-            local scan = scanCache[entry.Id]
-            result[#result + 1] = {
-                id = entry.Id,
-                group = entry.Group,
-                scripts = scan and scan.Scripts or nil,
-                remotes = scan and scan.Remotes or nil
-            }
-        end
-    end
-    return result
-end
-
-local function writeOutputs()
-    local files = {
-        {"_INDEX.luau", "return " .. serialize(codeIndex)},
-        {"_FILTER_REPORT.txt", buildFilterReport()},
-        {"_ERROR_LOG.txt", buildErrorLog()}
-    }
-    if options.Remotes then
-        files[#files + 1] = {"_REMOTE_MAP.luau", "return " .. serialize(remoteIndex)}
-    end
-    if options.RuntimeLinked then
-        files[#files + 1] = {"_RUNTIME_INDEX.luau", "return " .. serialize(runtimeIndex)}
-    end
-    if options.FullDump then
-        files[#files + 1] = {sanitize(state.Game) .. "_" .. tostring(state.PlaceId) .. "_FULL_DUMP.luau", buildFullDump()}
-    end
-
-    local manifest = {
-        name = "any dumper",
-        credit = "any ne",
-        game = state.Game,
-        placeId = state.PlaceId,
-        placeVersion = nil,
-        jobId = game.JobId,
-        executor = getExecutorName(),
-        mode = state.Mode,
-        runRoot = state.RunRoot,
-        generatedAt = os.time(),
-        durationSeconds = math.max(0, state.FinishedAt - state.StartedAt),
-        selectedRoots = selectedRootManifest(),
-        options = jsonSafe(options),
-        counts = {code = state.Code, remotes = state.Remotes, runtime = state.Runtime, failed = state.Failed},
-        filter = jsonSafe(filterStats)
-    }
-    pcall(function()
-        manifest.placeVersion = game.PlaceVersion
-    end)
-    local okManifest, manifestJson = pcall(function()
-        return HttpService:JSONEncode(manifest)
-    end)
-    if okManifest then
-        files[#files + 1] = {"_MANIFEST.json", manifestJson}
-    else
-        recordError("JSON", "manifest", manifestJson)
-    end
-    local okCaps, capsJson = pcall(function()
-        return HttpService:JSONEncode(buildCapabilities())
-    end)
-    if okCaps then
-        files[#files + 1] = {"_CAPABILITIES.json", capsJson}
-    end
-
-    for _, file in ipairs(files) do
-        local ok, err = writeVerified(state.RunRoot .. "/" .. file[1], file[2])
-        if not ok then
-            recordError("WRITE_CORE", file[1], err)
-        end
-    end
-
-    local status = table.concat({
+local function buildStatus()
+    return table.concat({
         "any dumper",
         "credit: any ne",
-        "phase: " .. state.Phase,
-        "mode: " .. state.Mode,
-        "game: " .. state.Game,
+        "game: " .. state.GameName,
         "placeId: " .. tostring(state.PlaceId),
+        "mode: " .. state.Mode,
+        "phase: " .. state.Phase,
         "runRoot: " .. state.RunRoot,
-        "code: " .. tostring(state.Code),
+        "code: " .. tostring(state.Scripts),
         "remotes: " .. tostring(state.Remotes),
         "runtime: " .. tostring(state.Runtime),
         "failed: " .. tostring(state.Failed),
-        "duration: " .. string.format("%.2fs", math.max(0, state.FinishedAt - state.StartedAt))
+        "executor: " .. executorName(),
+        "duration: " .. string.format("%.2fs", math.max(0, state.FinishedAt - state.StartedAt)),
+        "scanSeconds: " .. string.format("%.2f", timings.Scan or 0),
+        "codeSeconds: " .. string.format("%.2f", timings.Code or 0),
+        "remoteSeconds: " .. string.format("%.2f", timings.Remotes or 0),
+        "runtimeSeconds: " .. string.format("%.2f", timings.Runtime or 0),
+        "actorSeconds: " .. string.format("%.2f", timings.Actors or 0),
+        "networkSeconds: " .. string.format("%.2f", timings.Network or 0),
+        "capabilitySeconds: " .. string.format("%.2f", timings.Capabilities or 0),
+        "writeSeconds: " .. string.format("%.2f", timings.Write or 0)
     }, "\n")
-    writeVerified(state.RunRoot .. "/_DUMP_STATUS.txt", status)
 end
 
-local function storeMemoryFallback()
-    genv.AnyDumper_Output = {
-        RunRoot = state.RunRoot,
-        Index = codeIndex,
-        Remotes = remoteIndex,
-        Runtime = runtimeIndex,
-        Filter = jsonSafe(filterStats),
-        Errors = errors
+local function writeJson(path, value)
+    local ok, json = pcall(function()
+        return HttpService:JSONEncode(value)
+    end)
+    if not ok then
+        recordError("JSON", path, json)
+        return
+    end
+    local okWrite, err = writeVerified(path, json, false)
+    if not okWrite then
+        recordError("WRITE", path, err)
+    end
+end
+
+local function writeOutputs()
+    local started = os.clock()
+    state.Phase = "WRITING"
+    updateUI()
+    local indexText = "return " .. serialize(indexRows)
+    local remoteText = "return " .. serialize(remoteRows)
+    local runtimeText = "return " .. serialize(runtimeRows)
+    local files = {
+        {"_INDEX.luau", indexText},
+        {"_REMOTE_MAP.luau", remoteText},
+        {"_RUNTIME_INDEX.luau", runtimeText},
+        {"_FILTER_REPORT.txt", buildFilterReport()},
+        {"_ERROR_LOG.txt", buildErrorLog()}
     }
+    if options.FullDump then
+        local parts = {"return {"}
+        for _, row in ipairs(fullDumpRows) do
+            parts[#parts + 1] = "{FullName=" .. luaQuote(row.FullName) .. ",Root=" .. luaQuote(row.Root) .. ",Source=" .. longQuote(row.Source) .. "},"
+        end
+        parts[#parts + 1] = "}"
+        files[#files + 1] = {sanitize(state.GameName) .. "_" .. tostring(state.PlaceId) .. "_FULL_DUMP.luau", table.concat(parts, "\n")}
+    end
+    for _, file in ipairs(files) do
+        local ok, err = writeVerified(state.RunRoot .. "/" .. file[1], file[2], false)
+        if not ok then
+            recordError("WRITE", file[1], err)
+        end
+    end
+    writeJson(state.RunRoot .. "/_CAPABILITIES.json", jsonSafe(capProfile))
+    if #actorRows > 0 then
+        local okActor, actorErr = writeVerified(state.RunRoot .. "/_ACTOR_INDEX.luau", "return " .. serialize(actorRows), false)
+        if not okActor then recordError("WRITE", "_ACTOR_INDEX.luau", actorErr) end
+    end
+    if options.NetworkTrace or #networkRows > 0 then writeJson(state.RunRoot .. "/_NETWORK_TRACE.json", {Summary = networkSummary, Events = networkRows}) end
+    local structure = {}
+    for _, descriptor in ipairs(rootDescriptors) do
+        structure[descriptor.Key] = {
+            selected = descriptor.Selected,
+            group = descriptor.Group,
+            code = descriptor.ScriptCount,
+            remotes = descriptor.RemoteCount
+        }
+    end
+    writeJson(state.RunRoot .. "/_STRUCTURE.json", structure)
+    timings.Write = os.clock() - started
+    writeJson(state.RunRoot .. "/_MANIFEST.json", {
+        name = "any dumper",
+        credit = "any ne",
+        game = state.GameName,
+        placeId = state.PlaceId,
+        jobId = game.JobId,
+        mode = state.Mode,
+        executor = executorName(),
+        generatedAt = os.time(),
+        runRoot = state.RunRoot,
+        counts = {
+            code = state.Scripts,
+            remotes = state.Remotes,
+            runtime = state.Runtime,
+            actors = #actorRows,
+            networkEvents = #networkRows,
+            failed = state.Failed
+        },
+        capabilities = capProfile.Summary,
+        network = networkSummary,
+        durationSeconds = math.max(0, os.clock() - state.StartedAt),
+        timings = timings
+    })
+    timings.Write = os.clock() - started
 end
 
-local function runDump()
-    if state.Running or state.Scanning or not state.ScanReady then
-        return false
-    end
-    local chosen = selectedRoots()
-    if #chosen == 0 then
-        state.Phase = "SELECT ROOTS"
-        updateUI()
-        return false
-    end
-
-    state.Running = true
-    state.Cancelled = false
-    state.Phase = "PREPARING"
-    state.StartedAt = os.clock()
-    state.FinishedAt = 0
-    clearRunData()
-    state.Game = getGameName()
-    state.PlaceId = game.PlaceId
-    state.RunRoot = makeRunRoot()
-    updateUI()
-
-    local fileReady = caps.writefile and caps.makefolder
-    if fileReady then
-        local okFolder, folderErr = ensureFolder(state.RunRoot)
-        if not okFolder then
-            fileReady = false
-            recordError("FILESYSTEM", state.RunRoot, folderErr)
-        end
-    end
-
-    state.Phase = "DISCOVERING"
-    updateUI()
-    local scripts = discoverSelectedScripts()
-
-    state.Phase = "DUMPING CODE"
-    updateUI()
-    for index, item in ipairs(scripts) do
-        if state.Cancelled then
-            break
-        end
-        if fileReady then
-            dumpScript(item)
-        else
-            local source, method, decompileError = readScriptSource(item.Instance)
-            local fullName = safeFullName(item.Instance)
-            local row = {
-                Name = safeString(item.Instance.Name),
-                Class = safeClass(item.Instance),
-                FullName = fullName,
-                SelectedRoot = item.Entry.Id,
-                Origin = item.Entry.Group,
-                ReasonAccepted = item.Reason,
-                Method = method or "none",
-                Status = source and "MEMORY" or "FAILED"
-            }
-            codeIndex[#codeIndex + 1] = row
-            if source then
-                state.Code = state.Code + 1
-                if options.FullDump then
-                    fullDumpEntries[#fullDumpEntries + 1] = {Path = fullName, Root = item.Entry.Id, Class = safeClass(item.Instance), Source = source}
-                end
-            else
-                recordError("DECOMPILE", fullName, decompileError or "no readable source")
-            end
-        end
-        if index % 18 == 0 then
-            updateUI()
-            task.wait()
-        end
-    end
-
-    if not state.Cancelled then
-        state.Phase = "REMOTES"
-        updateUI()
-        collectSelectedRemotes()
-    end
-
-    if not state.Cancelled then
-        state.Phase = "RUNTIME"
-        updateUI()
-        collectRuntime()
-    end
-
+local function finalizeRun(cancelled)
+    if Network.Active then Network.stop() end
     state.FinishedAt = os.clock()
-    if state.Cancelled then
+    if cancelled then
         state.Phase = "CANCELLED"
+        state.Message = "Cancelled · partial run kept"
     elseif state.Failed > 0 then
         state.Phase = "COMPLETE*"
+        state.Message = tostring(state.Scripts) .. " code · " .. tostring(state.Remotes) .. " remotes · " .. tostring(state.Runtime) .. " runtime · " .. tostring(state.Failed) .. " failed"
     else
         state.Phase = "COMPLETE"
+        state.Message = tostring(state.Scripts) .. " code · " .. tostring(state.Remotes) .. " remotes · " .. tostring(state.Runtime) .. " runtime"
     end
-
-    if fileReady then
-        state.Phase = state.Cancelled and "CANCELLED" or "WRITING"
-        updateUI()
-        writeOutputs()
-        state.Phase = state.Cancelled and "CANCELLED" or (state.Failed > 0 and "COMPLETE*" or "COMPLETE")
-    else
-        storeMemoryFallback()
-    end
-
     state.Running = false
+    if state.RunRoot ~= "" and writefileFn then
+        pcall(function()
+            writeVerified(state.RunRoot .. "/_ERROR_LOG.txt", buildErrorLog(), false)
+            writeVerified(state.RunRoot .. "/_FILTER_REPORT.txt", buildFilterReport(), false)
+            writeVerified(state.RunRoot .. "/_DUMP_STATUS.txt", buildStatus(), false)
+        end)
+    end
     updateUI()
-    return true
 end
 
+local function makeRunRoot()
+    local base = state.Root .. "/Run_" .. timestamp()
+    if not isfolderFn then
+        return base
+    end
+    local candidate = base
+    local suffix = 1
+    while true do
+        local ok, exists = pcall(isfolderFn, candidate)
+        if not ok or not exists then
+            return candidate
+        end
+        suffix = suffix + 1
+        candidate = base .. "_" .. tostring(suffix)
+    end
+end
+
+local function startDump()
+    if state.Running or state.Scanning or not state.Scanned then
+        return
+    end
+    if not writefileFn or not makefolderFn then
+        state.Message = "Executor needs writefile + makefolder"
+        state.Phase = "FAILED"
+        updateUI()
+        return
+    end
+    state.Message = "Checking executor strategy..."
+    updateUI()
+    Capability.ensure()
+    resetDumpState()
+    state.Running = true
+    state.Cancelled = false
+    state.StartedAt = os.clock()
+    state.FinishedAt = 0
+    state.Phase = "STARTING"
+    state.GameName = getGameName()
+    state.Root = sanitize(state.GameName) .. "_" .. tostring(state.PlaceId) .. "_Dump"
+    state.RunRoot = makeRunRoot()
+    local okFolder, folderErr = ensureFolder(state.RunRoot)
+    if not okFolder then
+        recordError("FILESYSTEM", state.RunRoot, folderErr)
+        finalizeRun(false)
+        return
+    end
+    savePreferences()
+    updateUI()
+
+    local networkStarted = Network.start()
+    dumpScripts()
+    if not state.Cancelled then dumpRemotes() end
+    if not state.Cancelled then collectRuntime() end
+    if not state.Cancelled then Actor.collect() end
+    if networkStarted then Network.stop() end
+    writeOutputs()
+    state.FinishedAt = os.clock()
+    finalizeRun(state.Cancelled)
+end
+
+resolveRoots()
+state.GameName = getGameName()
 buildUI()
-updateAdvancedDefaults()
 updateUI()
+task.spawn(function()
+    state.Message = "Checking executor capabilities..."
+    updateUI()
+    Capability.run()
+    if not state.Running and not state.Scanning then state.Message = "Choose roots, then scan structure"; state.Phase = "READY" end
+    updateUI()
+end)
 
 ui.scanButton.MouseButton1Click:Connect(function()
-    if not state.Running and not state.Scanning then
-        task.spawn(scanStructure)
-    end
+    task.spawn(scanStructure)
 end)
 
 ui.dumpButton.MouseButton1Click:Connect(function()
-    if state.ScanReady and not state.Running and not state.Scanning then
-        task.spawn(function()
-            local ok, err = pcall(runDump)
-            if not ok then
-                state.Running = false
-                state.Phase = "FAILED"
-                recordError("FATAL", "runDump", err)
-                updateUI()
-            end
-        end)
-    end
+    task.spawn(startDump)
 end)
 
-genv.AnyDumper = {
+env.AnyDumper = {
     Scan = function()
         if state.Running or state.Scanning then
             return false, "busy"
@@ -2208,15 +2849,21 @@ genv.AnyDumper = {
         return true
     end,
     Run = function()
-        if state.Running or state.Scanning or not state.ScanReady then
-            return false, "scan structure first"
+        if state.Running or state.Scanning then
+            return false, "busy"
         end
-        task.spawn(runDump)
+        if not state.Scanned then
+            return false, "scan first"
+        end
+        task.spawn(startDump)
         return true
     end,
     Cancel = function()
-        state.Cancelled = true
-        return true
+        if state.Running or state.Scanning then
+            state.Cancelled = true
+            return true
+        end
+        return false
     end,
     SetMode = function(mode)
         if state.Running or state.Scanning then
@@ -2230,8 +2877,7 @@ genv.AnyDumper = {
         else
             state.Mode = "Balanced"
         end
-        genv.AnyDumper_Mode = state.Mode
-        updateAdvancedDefaults()
+        savePreferences()
         updateUI()
         return true, state.Mode
     end,
@@ -2239,26 +2885,38 @@ genv.AnyDumper = {
         return {
             Running = state.Running,
             Scanning = state.Scanning,
+            Scanned = state.Scanned,
             Phase = state.Phase,
             Mode = state.Mode,
-            BaseRoot = state.BaseRoot,
             RunRoot = state.RunRoot,
-            Code = state.Code,
+            Message = state.Message,
+            Code = state.Scripts,
             Remotes = state.Remotes,
             Runtime = state.Runtime,
             Failed = state.Failed,
-            ScanReady = state.ScanReady,
-            LastError = state.LastError
+            Processed = state.Processed,
+            Total = state.Total
         }
     end,
+    GetCapabilities = function() return jsonSafe(capProfile) end,
+    RefreshCapabilities = function()
+        if state.Running or state.Scanning or capabilityBusy then return false, "busy" end
+        task.spawn(function() state.Message = "Refreshing capabilities..."; updateUI(); Capability.run(); state.Message = "Capabilities refreshed"; updateUI() end)
+        return true
+    end,
+    GetNetworkTrace = function() return {Summary = jsonSafe(networkSummary), Events = jsonSafe(networkRows)} end,
+    GetActors = function() return jsonSafe(actorRows) end,
     GetScan = function()
-        return jsonSafe(scanCache)
-    end,
-    GetFilterReport = function()
-        return buildFilterReport()
-    end,
-    GetCapabilities = function()
-        return buildCapabilities()
+        local result = {}
+        for _, descriptor in ipairs(rootDescriptors) do
+            result[descriptor.Key] = {
+                Selected = descriptor.Selected,
+                Group = descriptor.Group,
+                Code = descriptor.ScriptCount,
+                Remotes = descriptor.RemoteCount
+            }
+        end
+        return result
     end,
     Destroy = function()
         state.Cancelled = true
@@ -2267,6 +2925,6 @@ genv.AnyDumper = {
                 ui.gui:Destroy()
             end
         end)
-        genv.AnyDumper = nil
+        env.AnyDumper = nil
     end
 }
