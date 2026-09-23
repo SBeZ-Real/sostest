@@ -1,847 +1,2272 @@
-local ScriptEditorService = game:GetService("ScriptEditorService")
-local HttpService = game:GetService("HttpService")
-local ServerStorage = game:GetService("ServerStorage")
+local genv = getgenv and getgenv() or _G
+
+if genv.AnyDumper and type(genv.AnyDumper.Destroy) == "function" then
+    pcall(genv.AnyDumper.Destroy)
+end
+
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ReplicatedFirst = game:GetService("ReplicatedFirst")
-local StarterPlayer = game:GetService("StarterPlayer")
-local StarterGui = game:GetService("StarterGui")
-local StarterPack = game:GetService("StarterPack")
 local Workspace = game:GetService("Workspace")
-local StudioService = game:GetService("StudioService")
+local StarterGui = game:GetService("StarterGui")
+local StarterPlayer = game:GetService("StarterPlayer")
+local StarterPack = game:GetService("StarterPack")
+local Lighting = game:GetService("Lighting")
+local SoundService = game:GetService("SoundService")
+local TextChatService = game:GetService("TextChatService")
+local MarketplaceService = game:GetService("MarketplaceService")
+local HttpService = game:GetService("HttpService")
+local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
 
-local oldOutput = ServerStorage:FindFirstChild("AnyDumperOutput")
+local LocalPlayer = Players.LocalPlayer
 
-if oldOutput then
-	oldOutput:Destroy()
+local function global(name)
+    local ok, value = pcall(function()
+        return genv[name]
+    end)
+    if ok and value ~= nil then
+        return value
+    end
+    local ok2, value2 = pcall(function()
+        return _G[name]
+    end)
+    if ok2 then
+        return value2
+    end
 end
 
-local output = Instance.new("Folder")
-output.Name = "AnyDumperOutput"
-output.Parent = ServerStorage
+local capNames = {
+    "writefile",
+    "readfile",
+    "makefolder",
+    "isfolder",
+    "isfile",
+    "decompile",
+    "getscriptbytecode",
+    "getloadedmodules",
+    "getnilinstances",
+    "getgc",
+    "getfenv",
+    "getsenv",
+    "getscriptclosure",
+    "getscriptfunction",
+    "getconstants",
+    "getupvalues",
+    "isexecutorclosure",
+    "isourclosure",
+    "getconnections",
+    "setclipboard",
+    "gethui",
+    "identifyexecutor",
+    "getexecutorname"
+}
 
-local scriptsOutput = Instance.new("Folder")
-scriptsOutput.Name = "Scripts"
-scriptsOutput.Parent = output
+local caps = {}
+for _, name in ipairs(capNames) do
+    caps[name] = type(global(name)) == "function"
+end
+caps.debugInfo = type(debug) == "table" and type(debug.info) == "function"
 
-local modulesOutput = Instance.new("Folder")
-modulesOutput.Name = "Modules"
-modulesOutput.Parent = output
+local writefileFn = global("writefile")
+local readfileFn = global("readfile")
+local makefolderFn = global("makefolder")
+local isfolderFn = global("isfolder")
+local isfileFn = global("isfile")
+local decompileFn = global("decompile")
+local bytecodeFn = global("getscriptbytecode")
+local getloadedmodulesFn = global("getloadedmodules")
+local getnilinstancesFn = global("getnilinstances")
+local getgcFn = global("getgc")
+local getfenvFn = global("getfenv")
+local getsenvFn = global("getsenv")
+local getscriptclosureFn = global("getscriptclosure")
+local getscriptfunctionFn = global("getscriptfunction")
+local getconstantsFn = global("getconstants")
+local getupvaluesFn = global("getupvalues")
+local isexecutorclosureFn = global("isexecutorclosure")
+local isourclosureFn = global("isourclosure")
+local getconnectionsFn = global("getconnections")
+local setclipboardFn = global("setclipboard")
+local gethuiFn = global("gethui")
+local identifyexecutorFn = global("identifyexecutor")
+local getexecutornameFn = global("getexecutorname")
 
-local remotesOutput = Instance.new("Folder")
-remotesOutput.Name = "Remotes"
-remotesOutput.Parent = output
+local state = {
+    Running = false,
+    Scanning = false,
+    Cancelled = false,
+    Phase = "READY",
+    Mode = "Balanced",
+    BaseRoot = "",
+    RunRoot = "",
+    Game = game.Name,
+    PlaceId = game.PlaceId,
+    Code = 0,
+    Remotes = 0,
+    Runtime = 0,
+    Failed = 0,
+    StartedAt = 0,
+    FinishedAt = 0,
+    LastError = nil,
+    ScanReady = false
+}
+
+local options = {
+    Remotes = true,
+    RuntimeLinked = true,
+    Bytecode = false,
+    FullDump = false,
+    LinkedNil = false
+}
+
+local errors = {}
+local codeIndex = {}
+local remoteIndex = {}
+local runtimeIndex = {Modules = {}, Functions = {}, Tables = {}, NilInstances = {}}
+local fullDumpEntries = {}
+local usedPaths = {}
+local acceptedScripts = {}
+local acceptedInstances = {}
+local acceptedFunctions = {}
+local linkedTables = {}
+local linkedNilInstances = {}
+local filterStats = {}
+local ui = {}
+local scanCache = {}
+
+local function safeString(value)
+    local ok, result = pcall(tostring, value)
+    return ok and result or "<unprintable>"
+end
+
+local function shortHash(text)
+    local hash = 5381
+    for i = 1, #text do
+        hash = (hash * 33 + string.byte(text, i)) % 4294967296
+    end
+    return string.format("%08x", hash)
+end
+
+local reserved = {
+    CON = true,
+    PRN = true,
+    AUX = true,
+    NUL = true,
+    COM1 = true,
+    COM2 = true,
+    COM3 = true,
+    COM4 = true,
+    COM5 = true,
+    COM6 = true,
+    COM7 = true,
+    COM8 = true,
+    COM9 = true,
+    LPT1 = true,
+    LPT2 = true,
+    LPT3 = true,
+    LPT4 = true,
+    LPT5 = true,
+    LPT6 = true,
+    LPT7 = true,
+    LPT8 = true,
+    LPT9 = true
+}
 
 local function sanitize(value)
-	value = tostring(value or "")
-	value = value:gsub('[<>:"/\\|%?%*]', "_")
-	value = value:gsub("[%c]", "_")
-	value = value:gsub("^%s+", "")
-	value = value:gsub("%s+$", "")
-	value = value:gsub("%.+$", "")
-
-	if value == "" then
-		value = "_"
-	end
-
-	return value
+    local s = safeString(value)
+    s = s:gsub("[%z\1-\31]", "_")
+    s = s:gsub("[<>:\"/\\|%?%*]", "_")
+    s = s:gsub("^%s+", "")
+    s = s:gsub("[%s%.]+$", "")
+    if s == "" then
+        s = "unnamed"
+    end
+    if reserved[string.upper(s)] then
+        s = s .. "_"
+    end
+    if #s > 80 then
+        s = s:sub(1, 62) .. "_" .. shortHash(s)
+    end
+    return s
 end
 
-local function hashString(value)
-	local hash = 2166136261
-
-	for index = 1, #value do
-		hash = (hash * 16777619 + string.byte(value, index)) % 4294967296
-	end
-
-	return string.format("%08x", hash)
+local function luaQuote(value)
+    return string.format("%q", safeString(value))
 end
 
-local function splitPath(instance)
-	local segments = {}
-	local current = instance
-
-	while current and current ~= game do
-		table.insert(segments, 1, current.Name)
-		current = current.Parent
-	end
-
-	return segments
+local function longQuote(text)
+    local content = safeString(text or "")
+    for level = 0, 12 do
+        local eq = string.rep("=", level)
+        local close = "]" .. eq .. "]"
+        if not string.find(content, close, 1, true) then
+            return "[" .. eq .. "[" .. content .. close
+        end
+    end
+    return luaQuote(content)
 end
 
-local function ensureFolder(parent, originalName, identity)
-	local cleanName = sanitize(originalName)
-	local existing = parent:FindFirstChild(cleanName)
-
-	if existing and existing:IsA("Folder") then
-		local original = existing:GetAttribute("OriginalName")
-
-		if original == originalName then
-			return existing
-		end
-	end
-
-	if existing then
-		cleanName = cleanName .. "__" .. hashString(identity):sub(1, 6)
-	end
-
-	local folder = Instance.new("Folder")
-	folder.Name = cleanName
-	folder:SetAttribute("OriginalName", originalName)
-	folder.Parent = parent
-
-	return folder
+local function serialize(value, depth, seen)
+    depth = depth or 0
+    seen = seen or {}
+    local kind = typeof and typeof(value) or type(value)
+    if kind == "nil" then
+        return "nil"
+    end
+    if kind == "boolean" or kind == "number" then
+        return tostring(value)
+    end
+    if kind == "string" then
+        return luaQuote(value)
+    end
+    if kind == "Instance" then
+        local full = safeString(value)
+        pcall(function()
+            full = value:GetFullName()
+        end)
+        return luaQuote(full)
+    end
+    if kind ~= "table" then
+        return luaQuote(safeString(value))
+    end
+    if seen[value] then
+        return luaQuote("<cycle>")
+    end
+    if depth >= 6 then
+        return luaQuote("<max-depth>")
+    end
+    seen[value] = true
+    local parts = {"{"}
+    local count = 0
+    for key, child in pairs(value) do
+        count = count + 1
+        if count > 500 then
+            parts[#parts + 1] = "[\"__TRUNCATED\"]=true,"
+            break
+        end
+        local keyText
+        if type(key) == "string" and key:match("^[%a_][%w_]*$") then
+            keyText = key
+        else
+            keyText = "[" .. serialize(key, depth + 1, seen) .. "]"
+        end
+        parts[#parts + 1] = keyText .. "=" .. serialize(child, depth + 1, seen) .. ","
+    end
+    parts[#parts + 1] = "}"
+    seen[value] = nil
+    return table.concat(parts)
 end
 
-local function createFile(root, instance, content)
-	local segments = splitPath(instance)
-	local parent = root
-
-	for index = 1, #segments - 1 do
-		parent = ensureFolder(parent, segments[index], table.concat(segments, "/", 1, index))
-	end
-
-	local originalName = segments[#segments]
-	local fileName = sanitize(originalName) .. ".lua"
-
-	if parent:FindFirstChild(fileName) then
-		fileName = sanitize(originalName) .. "__" .. hashString(instance:GetFullName()):sub(1, 6) .. ".lua"
-	end
-
-	local file = Instance.new("StringValue")
-	file.Name = fileName
-	file.Value = content
-	file:SetAttribute("OriginalName", originalName)
-	file:SetAttribute("OriginalFullName", instance:GetFullName())
-	file:SetAttribute("ClassName", instance.ClassName)
-	file.Parent = parent
-
-	return file
+local function jsonSafe(value, depth, seen)
+    depth = depth or 0
+    seen = seen or {}
+    local kind = typeof and typeof(value) or type(value)
+    if kind == "nil" then
+        return nil
+    end
+    if kind == "boolean" or kind == "number" or kind == "string" then
+        return value
+    end
+    if kind == "Instance" then
+        local full = safeString(value)
+        pcall(function()
+            full = value:GetFullName()
+        end)
+        return full
+    end
+    if kind ~= "table" then
+        return safeString(value)
+    end
+    if seen[value] or depth >= 5 then
+        return safeString(value)
+    end
+    seen[value] = true
+    local out = {}
+    local count = 0
+    for key, child in pairs(value) do
+        count = count + 1
+        if count > 250 then
+            out.__TRUNCATED = true
+            break
+        end
+        out[safeString(key)] = jsonSafe(child, depth + 1, seen)
+    end
+    seen[value] = nil
+    return out
 end
 
-local allowedRoots = {
-	ReplicatedStorage,
-	ReplicatedFirst,
-	StarterPlayer,
-	StarterGui,
-	StarterPack,
-	Workspace
+local function safeParent(instance)
+    local parent
+    pcall(function()
+        parent = instance.Parent
+    end)
+    return parent
+end
+
+local function safeClass(instance)
+    local class = "Unknown"
+    pcall(function()
+        class = instance.ClassName
+    end)
+    return class
+end
+
+local function safeFullName(instance)
+    local ok, result = pcall(function()
+        return instance:GetFullName()
+    end)
+    return ok and result or safeString(instance)
+end
+
+local function isLua(instance)
+    local ok, result = pcall(function()
+        return instance:IsA("LuaSourceContainer")
+    end)
+    if ok then
+        return result
+    end
+    local class = safeClass(instance)
+    return class == "LocalScript" or class == "ModuleScript" or class == "Script"
+end
+
+local function isRemote(instance)
+    local class = safeClass(instance)
+    return class == "RemoteEvent" or class == "RemoteFunction" or class == "UnreliableRemoteEvent"
+end
+
+local function isDescendant(instance, ancestor)
+    if not instance or not ancestor then
+        return false
+    end
+    local ok, result = pcall(function()
+        return instance:IsDescendantOf(ancestor)
+    end)
+    return ok and result == true
+end
+
+local defaultNames = {
+    PlayerModule = true,
+    PlayerScriptsLoader = true,
+    RbxCharacterSounds = true,
+    BubbleChat = true,
+    ChatScript = true,
+    ExperienceChat = true,
+    CharacterSoundEvent = true,
+    SoundDispatcher = true,
+    CameraModule = true,
+    ControlModule = true
 }
 
-local function isAllowed(instance)
-	for _, root in ipairs(allowedRoots) do
-		if instance == root or instance:IsDescendantOf(root) then
-			return true
-		end
-	end
-
-	return false
-end
-
-local function isClientScript(instance)
-	if instance:IsA("LocalScript") then
-		return true
-	end
-
-	if instance:IsA("Script") then
-		local success, runContext = pcall(function()
-			return instance.RunContext
-		end)
-
-		if success and tostring(runContext) == "Enum.RunContext.Client" then
-			return true
-		end
-	end
-
-	return false
-end
-
-local function readSource(instance)
-	local success, source = pcall(function()
-		return ScriptEditorService:GetEditorSource(instance)
-	end)
-
-	if success and type(source) == "string" then
-		return source, "ScriptEditorService", nil
-	end
-
-	local fallbackSuccess, fallbackSource = pcall(function()
-		return instance.Source
-	end)
-
-	if fallbackSuccess and type(fallbackSource) == "string" then
-		return fallbackSource, "Source", nil
-	end
-
-	return nil, nil, tostring(source)
-end
-
-local remoteInstances = {}
-
-local remoteRoots = {
-	ReplicatedStorage,
-	ReplicatedFirst,
-	Workspace
+local coreSourceHints = {
+    "corepackages",
+    "coregui",
+    "robloxgui",
+    "robloxreplicatedstorage",
+    "playerscriptsloader",
+    "playermodule.cameramodule",
+    "playermodule.controlmodule",
+    "rbxcharactersounds",
+    "experiencechat"
 }
 
-for _, root in ipairs(remoteRoots) do
-	for _, instance in ipairs(root:GetDescendants()) do
-		if instance:IsA("RemoteEvent") or instance:IsA("RemoteFunction") or instance:IsA("UnreliableRemoteEvent") then
-			table.insert(remoteInstances, instance)
-		end
-	end
-end
-
-local function getAliases(source)
-	local aliases = {}
-
-	for variable, service in source:gmatch('local%s+([%a_][%w_]*)%s*=%s*game:GetService%s*%(%s*"([^"]+)"%s*%)') do
-		aliases[variable] = service
-	end
-
-	for variable, service in source:gmatch("local%s+([%a_][%w_]*)%s*=%s*game:GetService%s*%(%s*'([^']+)'%s*%)") do
-		aliases[variable] = service
-	end
-
-	return aliases
-end
-
-local function normalizeExpression(expression)
-	expression = expression:gsub("%s+", "")
-	expression = expression:gsub(':WaitForChild%("([^"]+)"%)', ".%1")
-	expression = expression:gsub(":WaitForChild%('([^']+)'%)", ".%1")
-	expression = expression:gsub(':FindFirstChild%("([^"]+)"%)', ".%1")
-	expression = expression:gsub(":FindFirstChild%('([^']+)'%)", ".%1")
-	expression = expression:gsub('%["([^"]+)"%]', ".%1")
-	expression = expression:gsub("%['([^']+)'%]", ".%1")
-
-	return expression
-end
-
-local function walkExpression(startInstance, path)
-	local current = startInstance
-
-	for segment in path:gmatch("%.([^%.]+)") do
-		if segment == "Parent" then
-			current = current and current.Parent or nil
-		else
-			current = current and current:FindFirstChild(segment) or nil
-		end
-
-		if not current then
-			return nil
-		end
-	end
-
-	return current
-end
-
-local function resolveRequire(context, expression, aliases)
-	expression = normalizeExpression(expression)
-
-	if expression:sub(1, 6) == "script" then
-		local result = walkExpression(context, expression:sub(7))
-
-		if result and result:IsA("ModuleScript") and isAllowed(result) then
-			return result
-		end
-
-		return nil
-	end
-
-	local doubleService = expression:match('^game:GetService%("([^"]+)"%)')
-
-	if doubleService then
-		local serviceSuccess, service = pcall(function()
-			return game:GetService(doubleService)
-		end)
-
-		if serviceSuccess then
-			local prefix = 'game:GetService("' .. doubleService .. '")'
-			local result = walkExpression(service, expression:sub(#prefix + 1))
-
-			if result and result:IsA("ModuleScript") and isAllowed(result) then
-				return result
-			end
-		end
-	end
-
-	local singleService = expression:match("^game:GetService%('([^']+)'%)")
-
-	if singleService then
-		local serviceSuccess, service = pcall(function()
-			return game:GetService(singleService)
-		end)
-
-		if serviceSuccess then
-			local prefix = "game:GetService('" .. singleService .. "')"
-			local result = walkExpression(service, expression:sub(#prefix + 1))
-
-			if result and result:IsA("ModuleScript") and isAllowed(result) then
-				return result
-			end
-		end
-	end
-
-	local directService, directPath = expression:match("^game%.([%w_]+)(.*)$")
-
-	if directService then
-		local service = game:FindFirstChild(directService)
-
-		if service then
-			local result = walkExpression(service, directPath)
-
-			if result and result:IsA("ModuleScript") and isAllowed(result) then
-				return result
-			end
-		end
-	end
-
-	local alias, aliasPath = expression:match("^([%a_][%w_]*)(.*)$")
-
-	if alias and aliases[alias] then
-		local serviceSuccess, service = pcall(function()
-			return game:GetService(aliases[alias])
-		end)
-
-		if serviceSuccess then
-			local result = walkExpression(service, aliasPath)
-
-			if result and result:IsA("ModuleScript") and isAllowed(result) then
-				return result
-			end
-		end
-	end
-
-	return nil
-end
-
-local function extractFunctions(source)
-	local found = {}
-	local seen = {}
-
-	local function add(name)
-		if name and name ~= "" and not seen[name] then
-			seen[name] = true
-			table.insert(found, name)
-		end
-	end
-
-	for name in source:gmatch("local%s+function%s+([%a_][%w_]*)%s*%(") do
-		add(name)
-	end
-
-	for name in source:gmatch("function%s+([%a_][%w_%.:]*)%s*%(") do
-		add(name)
-	end
-
-	for name in source:gmatch("([%a_][%w_]*)%s*=%s*function%s*%(") do
-		add(name)
-	end
-
-	table.sort(found)
-
-	return found
-end
-
-local function extractEvents(source)
-	local tokens = {
-		"OnClientEvent",
-		"RenderStepped",
-		"Heartbeat",
-		"Stepped",
-		"PreSimulation",
-		"PostSimulation",
-		"InputBegan",
-		"InputEnded",
-		"InputChanged",
-		"Activated",
-		"Deactivated",
-		"Touched",
-		"Changed",
-		"GetPropertyChangedSignal",
-		"GetAttributeChangedSignal",
-		"CharacterAdded",
-		"ChildAdded",
-		"DescendantAdded"
-	}
-
-	local result = {}
-
-	for _, token in ipairs(tokens) do
-		if source:find(token, 1, true) then
-			table.insert(result, token)
-		end
-	end
-
-	return result
-end
-
-local function extractStateAccess(source)
-	local tokens = {
-		"GetAttribute",
-		"SetAttribute",
-		"WaitForChild",
-		"FindFirstChild",
-		"leaderstats",
-		"CollectionService",
-		"GetTagged",
-		"Value",
-		"GetPropertyChangedSignal"
-	}
-
-	local result = {}
-
-	for _, token in ipairs(tokens) do
-		if source:find(token, 1, true) then
-			table.insert(result, token)
-		end
-	end
-
-	return result
-end
-
-local function extractRemoteReferences(source)
-	local result = {}
-	local seen = {}
-
-	for _, remote in ipairs(remoteInstances) do
-		if not seen[remote] and source:find(remote.Name, 1, true) then
-			seen[remote] = true
-
-			table.insert(result, {
-				name = remote.Name,
-				class_name = remote.ClassName,
-				full_name = remote:GetFullName()
-			})
-		end
-	end
-
-	table.sort(result, function(a, b)
-		return a.full_name < b.full_name
-	end)
-
-	return result
-end
-
-local function extractDependencies(instance, source)
-	local aliases = getAliases(source)
-	local dependencies = {}
-	local resolvedInstances = {}
-	local seenExpression = {}
-	local seenInstance = {}
-
-	for expression in source:gmatch("require%s*%((.-)%)") do
-		if not seenExpression[expression] then
-			seenExpression[expression] = true
-
-			local resolved = resolveRequire(instance, expression, aliases)
-
-			local entry = {
-				expression = expression,
-				resolved = resolved ~= nil,
-				full_name = resolved and resolved:GetFullName() or nil
-			}
-
-			table.insert(dependencies, entry)
-
-			if resolved and not seenInstance[resolved] then
-				seenInstance[resolved] = true
-				table.insert(resolvedInstances, resolved)
-			end
-		end
-	end
-
-	return dependencies, resolvedInstances
-end
-
-local function determineEntryPoints(functions)
-	local result = {}
-
-	for _, name in ipairs(functions) do
-		local lowered = string.lower(name)
-
-		if lowered == "init"
-			or lowered == "start"
-			or lowered == "initialize"
-			or lowered == "run"
-			or lowered:match("%.init$")
-			or lowered:match(":init$")
-			or lowered:match("%.start$")
-			or lowered:match(":start$")
-			or lowered:match("%.initialize$")
-			or lowered:match(":initialize$")
-		then
-			table.insert(result, name)
-		end
-	end
-
-	return result
-end
-
-local function classifyOrigin(instance)
-	if instance == ReplicatedStorage or instance:IsDescendantOf(ReplicatedStorage) then
-		return "shared"
-	end
-
-	if instance == Workspace or instance:IsDescendantOf(Workspace) then
-		return "workspace"
-	end
-
-	return "client"
-end
-
-local function formatStringList(values)
-	if #values == 0 then
-		return "--   None"
-	end
-
-	local lines = {}
-
-	for _, value in ipairs(values) do
-		table.insert(lines, "--   " .. tostring(value))
-	end
-
-	return table.concat(lines, "\n")
-end
-
-local function buildContent(instance, source, sourceMethod, analysis)
-	local dependencyLines = {}
-
-	for _, dependency in ipairs(analysis.dependencies) do
-		if dependency.resolved then
-			table.insert(dependencyLines, dependency.expression .. " -> " .. dependency.full_name)
-		else
-			table.insert(dependencyLines, dependency.expression .. " -> unresolved")
-		end
-	end
-
-	local remoteLines = {}
-
-	for _, remote in ipairs(analysis.remote_references) do
-		table.insert(remoteLines, remote.class_name .. " " .. remote.full_name)
-	end
-
-	local warningLines = {}
-
-	for _, dependency in ipairs(analysis.dependencies) do
-		if not dependency.resolved then
-			table.insert(warningLines, "Unresolved require: " .. dependency.expression)
-		end
-	end
-
-	if #warningLines == 0 then
-		table.insert(warningLines, "None")
-	end
-
-	local header = table.concat({
-		"-- Any Dumper Studio Export",
-		"-- Script: " .. instance.Name,
-		"-- Class: " .. instance.ClassName,
-		"-- Path: " .. instance:GetFullName(),
-		"-- Origin: " .. classifyOrigin(instance),
-		"-- Source Method: " .. sourceMethod,
-		"-- Dump Time: " .. os.date("!%Y-%m-%dT%H:%M:%SZ"),
-		"",
-		source,
-		"",
-		"-- Analysis",
-		"-- Dependencies:",
-		formatStringList(dependencyLines),
-		"-- Remote References:",
-		formatStringList(remoteLines),
-		"-- Events / Connections:",
-		formatStringList(analysis.events),
-		"-- Important Functions:",
-		formatStringList(analysis.functions),
-		"-- State / Data Access:",
-		formatStringList(analysis.state_access),
-		"-- Potential Entry Points:",
-		formatStringList(analysis.entry_points),
-		"-- Warnings:",
-		formatStringList(warningLines)
-	}, "\n")
-
-	return header
-end
-
-local manifest = {
-	game = {
-		name = game.Name,
-		place_id = game.PlaceId,
-		game_id = game.GameId,
-		dump_time = os.date("!%Y-%m-%dT%H:%M:%SZ")
-	},
-	environment = {
-		type = "Roblox Studio",
-		studio_user_id = 0
-	},
-	scope = "client_static",
-	capabilities = {
-		script_editor_service = true,
-		executor_decompile = false,
-		runtime_gc_scan = false,
-		filesystem = false
-	},
-	statistics = {
-		scripts_found = 0,
-		scripts_dumped = 0,
-		scripts_failed = 0,
-		modules_found = 0,
-		modules_dumped = 0,
-		modules_failed = 0,
-		remotes_found = #remoteInstances
-	},
-	scripts = {},
-	modules = {},
-	remotes = {},
-	errors = {}
+local executorSourceHints = {
+    "anydumper",
+    "synapse",
+    "scriptware",
+    "script-ware",
+    "fluxus",
+    "krnl",
+    "solara",
+    "wave",
+    "codex",
+    "xeno",
+    "electron",
+    "arceus",
+    "deltaexecutor"
 }
 
-pcall(function()
-	manifest.environment.studio_user_id = StudioService:GetUserId()
+local function sourceRejected(source)
+    local lower = string.lower(safeString(source or ""))
+    for _, hint in ipairs(coreSourceHints) do
+        if lower:find(hint, 1, true) then
+            return true, "CoreSource"
+        end
+    end
+    for _, hint in ipairs(executorSourceHints) do
+        if lower:find(hint, 1, true) then
+            return true, "ExecutorSource"
+        end
+    end
+    return false
+end
+
+local function belongsToAnyCharacter(instance)
+    for _, player in ipairs(Players:GetPlayers()) do
+        local character
+        pcall(function()
+            character = player.Character
+        end)
+        if character and isDescendant(instance, character) then
+            return player, character
+        end
+    end
+end
+
+local function isDefaultLocalObject(instance)
+    if not LocalPlayer then
+        return false
+    end
+    local cursor = instance
+    local guard = 0
+    while cursor and guard < 80 do
+        local parent = safeParent(cursor)
+        if parent == LocalPlayer then
+            break
+        end
+        local name = safeString(cursor.Name)
+        if defaultNames[name] then
+            return true
+        end
+        cursor = parent
+        guard = guard + 1
+    end
+    return false
+end
+
+local function recordError(scope, target, err)
+    local row = {
+        Scope = safeString(scope or "UNKNOWN"),
+        Target = safeString(target or "UNKNOWN"),
+        Error = safeString(err or "UNKNOWN")
+    }
+    errors[#errors + 1] = row
+    state.Failed = state.Failed + 1
+    state.LastError = row
+end
+
+local function resetFilterStats()
+    filterStats = {
+        ScriptsDiscovered = 0,
+        ScriptsAccepted = 0,
+        RemotesDiscovered = 0,
+        RemotesAccepted = 0,
+        RuntimeFunctionsScanned = 0,
+        RuntimeFunctionsAccepted = 0,
+        RuntimeTablesScanned = 0,
+        RuntimeTablesAccepted = 0,
+        ModulesDiscovered = 0,
+        ModulesAccepted = 0,
+        NilDiscovered = 0,
+        NilAccepted = 0,
+        Rejected = {}
+    }
+end
+
+local function reject(reason)
+    filterStats.Rejected[reason] = (filterStats.Rejected[reason] or 0) + 1
+end
+
+local function ensureFolder(path)
+    if not caps.makefolder then
+        return false, "makefolder unavailable"
+    end
+    local current = ""
+    for segment in string.gmatch(path, "[^/]+") do
+        current = current == "" and segment or current .. "/" .. segment
+        local exists = false
+        if caps.isfolder then
+            local ok, result = pcall(isfolderFn, current)
+            exists = ok and result == true
+        end
+        if not exists then
+            local ok, err = pcall(makefolderFn, current)
+            if not ok and caps.isfolder then
+                local ok2, exists2 = pcall(isfolderFn, current)
+                if not ok2 or not exists2 then
+                    return false, safeString(err)
+                end
+            end
+        end
+    end
+    return true
+end
+
+local function parentFolder(path)
+    return path:match("^(.*)/[^/]+$")
+end
+
+local function uniquePath(path)
+    if not usedPaths[path] then
+        usedPaths[path] = true
+        return path
+    end
+    local base, ext = path:match("^(.*)(%.[^%./]+)$")
+    base = base or path
+    ext = ext or ""
+    local index = 2
+    local candidate = base .. "_" .. tostring(index) .. ext
+    while usedPaths[candidate] do
+        index = index + 1
+        candidate = base .. "_" .. tostring(index) .. ext
+    end
+    usedPaths[candidate] = true
+    return candidate
+end
+
+local function writeVerified(path, data)
+    if not caps.writefile then
+        return false, "writefile unavailable"
+    end
+    local folder = parentFolder(path)
+    if folder then
+        local okFolder, folderErr = ensureFolder(folder)
+        if not okFolder then
+            return false, folderErr
+        end
+    end
+    local okWrite, writeErr = pcall(writefileFn, path, data)
+    if not okWrite then
+        return false, safeString(writeErr)
+    end
+    if caps.readfile then
+        local okRead, readBack = pcall(readfileFn, path)
+        if not okRead then
+            return false, "verify read failed: " .. safeString(readBack)
+        end
+        if readBack ~= data then
+            return false, "verify content mismatch"
+        end
+    elseif caps.isfile then
+        local okFile, exists = pcall(isfileFn, path)
+        if not okFile or not exists then
+            return false, "verify file missing"
+        end
+    end
+    return true
+end
+
+local function getExecutorName()
+    if identifyexecutorFn then
+        local ok, a, b = pcall(identifyexecutorFn)
+        if ok then
+            return b and safeString(a) .. " " .. safeString(b) or safeString(a)
+        end
+    end
+    if getexecutornameFn then
+        local ok, result = pcall(getexecutornameFn)
+        if ok then
+            return safeString(result)
+        end
+    end
+    return "Unknown"
+end
+
+local function getGameName()
+    local name = game.Name
+    local ok, info = pcall(function()
+        return MarketplaceService:GetProductInfo(game.PlaceId)
+    end)
+    if ok and type(info) == "table" and type(info.Name) == "string" and info.Name ~= "" then
+        name = info.Name
+    end
+    return name
+end
+
+local function runStamp()
+    local ok, value = pcall(function()
+        return os.date("!%Y%m%d_%H%M%S")
+    end)
+    if ok and type(value) == "string" then
+        return value
+    end
+    return tostring(os.time())
+end
+
+local function makeRunRoot()
+    state.BaseRoot = sanitize(state.Game) .. "_" .. tostring(state.PlaceId) .. "_Dump"
+    local base = state.BaseRoot .. "/Run_" .. runStamp()
+    local root = base
+    local index = 2
+    if caps.isfolder then
+        while true do
+            local ok, exists = pcall(isfolderFn, root)
+            if not ok or not exists then
+                break
+            end
+            root = base .. "_" .. tostring(index)
+            index = index + 1
+        end
+    else
+        root = base .. "_" .. shortHash(tostring(os.clock())):sub(1, 4)
+    end
+    return root
+end
+
+local function normalizeSource(value)
+    local s = string.lower(safeString(value or ""))
+    s = s:gsub("^[@=]", "")
+    s = s:gsub("\\", "/")
+    s = s:gsub("/", ".")
+    s = s:gsub("%s+", "")
+    return s
+end
+
+local function isExecutorClosure(fn)
+    if isexecutorclosureFn then
+        local ok, result = pcall(isexecutorclosureFn, fn)
+        if ok and result == true then
+            return true
+        end
+    end
+    if isourclosureFn then
+        local ok, result = pcall(isourclosureFn, fn)
+        if ok and result == true then
+            return true
+        end
+    end
+    return false
+end
+
+local roots = {
+    {Id = "ReplicatedStorage", Group = "Game", Name = "ReplicatedStorage", Selected = true, Root = function() return ReplicatedStorage end},
+    {Id = "ReplicatedFirst", Group = "Game", Name = "ReplicatedFirst", Selected = true, Root = function() return ReplicatedFirst end},
+    {Id = "Workspace", Group = "Game", Name = "Workspace", Selected = true, Root = function() return Workspace end},
+    {Id = "StarterPlayer", Group = "Game", Name = "StarterPlayer", Selected = true, Root = function() return StarterPlayer end},
+    {Id = "StarterGui", Group = "Game", Name = "StarterGui", Selected = true, Root = function() return StarterGui end},
+    {Id = "StarterPack", Group = "Game", Name = "StarterPack", Selected = true, Root = function() return StarterPack end},
+    {Id = "Lighting", Group = "Game", Name = "Lighting", Selected = true, Root = function() return Lighting end},
+    {Id = "SoundService", Group = "Game", Name = "SoundService", Selected = true, Root = function() return SoundService end},
+    {Id = "TextChatService", Group = "Game", Name = "TextChatService", Selected = false, Root = function() return TextChatService end},
+    {Id = "PlayerScripts", Group = "Local Player", Name = "PlayerScripts", Selected = true, Root = function() return LocalPlayer and LocalPlayer:FindFirstChild("PlayerScripts") end},
+    {Id = "PlayerGui", Group = "Local Player", Name = "PlayerGui", Selected = true, Root = function() return LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui") end},
+    {Id = "Backpack", Group = "Local Player", Name = "Backpack", Selected = true, Root = function() return LocalPlayer and LocalPlayer:FindFirstChild("Backpack") end},
+    {Id = "Character", Group = "Local Player", Name = "Character", Selected = false, Root = function() return LocalPlayer and LocalPlayer.Character end}
+}
+
+local function rootForInstance(instance)
+    local preferred = {"Character", "PlayerScripts", "PlayerGui", "Backpack"}
+    for _, idValue in ipairs(preferred) do
+        for _, entry in ipairs(roots) do
+            if entry.Id == idValue and entry.Selected then
+                local root = entry.Root()
+                if root and (instance == root or isDescendant(instance, root)) then
+                    return entry, root
+                end
+            end
+        end
+    end
+    for _, entry in ipairs(roots) do
+        if entry.Selected then
+            local root = entry.Root()
+            if root and (instance == root or isDescendant(instance, root)) then
+                return entry, root
+            end
+        end
+    end
+end
+
+local function instanceAllowed(instance, entry, root)
+    if not instance or not root then
+        return false, "MissingRoot"
+    end
+    if safeClass(instance) == "CoreScript" then
+        return false, "CoreScript"
+    end
+    if isDescendant(instance, CoreGui) then
+        return false, "CoreGui"
+    end
+    local characterOwner = belongsToAnyCharacter(instance)
+    if characterOwner then
+        if entry.Id == "Character" and characterOwner == LocalPlayer then
+            return true, "LocalCharacter"
+        end
+        return false, characterOwner == LocalPlayer and "CharacterNotSelected" or "OtherPlayerCharacter"
+    end
+    if entry.Group == "Local Player" then
+        if isDefaultLocalObject(instance) then
+            return false, "RobloxDefaultPlayer"
+        end
+        return true, "LocalPlayerRoot"
+    end
+    return true, "SelectedGameRoot"
+end
+
+local function relativeSegments(instance, root, entry)
+    local segments = {sanitize(entry.Id)}
+    if instance == root then
+        return segments
+    end
+    local chain = {}
+    local cursor = instance
+    local guard = 0
+    while cursor and cursor ~= root and guard < 100 do
+        table.insert(chain, 1, sanitize(cursor.Name))
+        cursor = safeParent(cursor)
+        guard = guard + 1
+    end
+    for _, segment in ipairs(chain) do
+        segments[#segments + 1] = segment
+    end
+    return segments
+end
+
+local function outputPath(kind, entry, root, instance, extension)
+    local parts = {state.RunRoot, kind}
+    for _, segment in ipairs(relativeSegments(instance, root, entry)) do
+        parts[#parts + 1] = segment
+    end
+    local path = table.concat(parts, "/") .. extension
+    return uniquePath(path)
+end
+
+local function setText(object, text)
+    if object then
+        pcall(function()
+            object.Text = safeString(text)
+        end)
+    end
+end
+
+local function new(class, props, parent)
+    local object = Instance.new(class)
+    for key, value in pairs(props or {}) do
+        object[key] = value
+    end
+    object.Parent = parent
+    return object
+end
+
+local function buttonStyle(button, active)
+    button.BackgroundColor3 = active and Color3.fromRGB(219, 239, 201) or Color3.fromRGB(27, 31, 38)
+    button.TextColor3 = active and Color3.fromRGB(20, 26, 17) or Color3.fromRGB(205, 210, 219)
+end
+
+local function updateAdvancedDefaults()
+    if state.Mode == "Strict" then
+        options.RuntimeLinked = false
+        options.LinkedNil = false
+    elseif state.Mode == "Balanced" then
+        options.RuntimeLinked = true
+        options.LinkedNil = false
+    else
+        options.RuntimeLinked = true
+        options.LinkedNil = true
+    end
+end
+
+local function updateUI()
+    setText(ui.phase, state.Phase)
+    setText(ui.codeValue, state.Code)
+    setText(ui.remoteValue, state.Remotes)
+    setText(ui.runtimeValue, state.Runtime)
+    setText(ui.failedValue, state.Failed)
+    setText(ui.path, state.RunRoot ~= "" and state.RunRoot or "No run folder yet")
+    if ui.scanButton then
+        ui.scanButton.Text = state.Scanning and "Scanning..." or "Scan Structure"
+        ui.scanButton.Active = not state.Running and not state.Scanning
+        ui.scanButton.AutoButtonColor = not state.Running and not state.Scanning
+    end
+    if ui.dumpButton then
+        ui.dumpButton.Active = state.ScanReady and not state.Running and not state.Scanning
+        ui.dumpButton.AutoButtonColor = ui.dumpButton.Active
+        ui.dumpButton.TextTransparency = ui.dumpButton.Active and 0 or 0.45
+        ui.dumpButton.Text = state.Running and "Dumping..." or "Dump Selected"
+    end
+    if ui.cancelButton then
+        ui.cancelButton.Visible = state.Running or state.Scanning
+    end
+    if ui.modeButtons then
+        for mode, button in pairs(ui.modeButtons) do
+            buttonStyle(button, mode == state.Mode)
+        end
+    end
+    if ui.optionButtons then
+        for name, button in pairs(ui.optionButtons) do
+            local disabled = state.Mode == "Strict" and (name == "RuntimeLinked" or name == "LinkedNil")
+            button.Text = (options[name] and "☑ " or "☐ ") .. button:GetAttribute("Label")
+            button.TextColor3 = disabled and Color3.fromRGB(84, 88, 98) or Color3.fromRGB(190, 196, 207)
+            button.Active = not disabled and not state.Running and not state.Scanning
+        end
+    end
+    if ui.rootButtons then
+        for _, entry in ipairs(roots) do
+            local button = ui.rootButtons[entry.Id]
+            if button then
+                button.Text = (entry.Selected and "☑  " or "☐  ") .. entry.Name
+                button.TextColor3 = entry.Selected and Color3.fromRGB(229, 233, 239) or Color3.fromRGB(128, 135, 147)
+            end
+            local count = ui.rootCounts and ui.rootCounts[entry.Id]
+            if count then
+                local scan = scanCache[entry.Id]
+                if scan then
+                    count.Text = tostring(scan.Scripts) .. " scripts  ·  " .. tostring(scan.Remotes) .. " remotes"
+                else
+                    count.Text = "not scanned"
+                end
+            end
+        end
+    end
+end
+
+local function buildUI()
+    local parent
+    if gethuiFn then
+        local ok, result = pcall(gethuiFn)
+        if ok and result then
+            parent = result
+        end
+    end
+    if not parent then
+        parent = CoreGui
+        local ok = pcall(function()
+            local test = Instance.new("Folder")
+            test.Name = "__any_dumper_test"
+            test.Parent = parent
+            test:Destroy()
+        end)
+        if not ok and LocalPlayer then
+            parent = LocalPlayer:WaitForChild("PlayerGui")
+        end
+    end
+
+    pcall(function()
+        local old = parent:FindFirstChild("AnyDumperUI")
+        if old then
+            old:Destroy()
+        end
+    end)
+
+    local gui = new("ScreenGui", {
+        Name = "AnyDumperUI",
+        ResetOnSpawn = false,
+        ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    }, parent)
+
+    local frame = new("Frame", {
+        Size = UDim2.fromOffset(620, 600),
+        Position = UDim2.new(0.5, -310, 0.5, -300),
+        BackgroundColor3 = Color3.fromRGB(13, 15, 19),
+        BorderSizePixel = 0
+    }, gui)
+    new("UICorner", {CornerRadius = UDim.new(0, 14)}, frame)
+    new("UIStroke", {Color = Color3.fromRGB(42, 46, 55), Thickness = 1}, frame)
+
+    local top = new("Frame", {Size = UDim2.new(1, 0, 0, 64), BackgroundTransparency = 1}, frame)
+    new("TextLabel", {
+        Size = UDim2.new(1, -180, 0, 26),
+        Position = UDim2.fromOffset(18, 10),
+        BackgroundTransparency = 1,
+        Text = "any dumper",
+        TextColor3 = Color3.fromRGB(242, 244, 247),
+        Font = Enum.Font.GothamBold,
+        TextSize = 19,
+        TextXAlignment = Enum.TextXAlignment.Left
+    }, top)
+    new("TextLabel", {
+        Size = UDim2.new(1, -180, 0, 18),
+        Position = UDim2.fromOffset(19, 34),
+        BackgroundTransparency = 1,
+        Text = "any ne  ·  game code selector",
+        TextColor3 = Color3.fromRGB(104, 111, 123),
+        Font = Enum.Font.Gotham,
+        TextSize = 10,
+        TextXAlignment = Enum.TextXAlignment.Left
+    }, top)
+
+    ui.phase = new("TextLabel", {
+        Size = UDim2.fromOffset(122, 28),
+        Position = UDim2.new(1, -140, 0, 15),
+        BackgroundColor3 = Color3.fromRGB(24, 28, 34),
+        BorderSizePixel = 0,
+        Text = "READY",
+        TextColor3 = Color3.fromRGB(158, 218, 178),
+        Font = Enum.Font.GothamSemibold,
+        TextSize = 10
+    }, top)
+    new("UICorner", {CornerRadius = UDim.new(0, 8)}, ui.phase)
+
+    local gameLine = new("TextLabel", {
+        Size = UDim2.new(1, -36, 0, 26),
+        Position = UDim2.fromOffset(18, 62),
+        BackgroundTransparency = 1,
+        Text = state.Game .. "  ·  " .. tostring(state.PlaceId),
+        TextColor3 = Color3.fromRGB(178, 184, 194),
+        Font = Enum.Font.Gotham,
+        TextSize = 11,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd
+    }, frame)
+    ui.gameLine = gameLine
+
+    new("TextLabel", {
+        Size = UDim2.fromOffset(110, 18),
+        Position = UDim2.fromOffset(18, 94),
+        BackgroundTransparency = 1,
+        Text = "1  MODE",
+        TextColor3 = Color3.fromRGB(100, 106, 118),
+        Font = Enum.Font.GothamSemibold,
+        TextSize = 9,
+        TextXAlignment = Enum.TextXAlignment.Left
+    }, frame)
+
+    ui.modeButtons = {}
+    local modes = {"Strict", "Balanced", "Deep"}
+    for i, mode in ipairs(modes) do
+        local button = new("TextButton", {
+            Size = UDim2.fromOffset(128, 34),
+            Position = UDim2.fromOffset(18 + (i - 1) * 136, 116),
+            BackgroundColor3 = Color3.fromRGB(27, 31, 38),
+            BorderSizePixel = 0,
+            Text = mode,
+            TextColor3 = Color3.fromRGB(205, 210, 219),
+            Font = Enum.Font.GothamSemibold,
+            TextSize = 11,
+            AutoButtonColor = false
+        }, frame)
+        new("UICorner", {CornerRadius = UDim.new(0, 8)}, button)
+        new("UIStroke", {Color = Color3.fromRGB(43, 48, 58), Thickness = 1}, button)
+        ui.modeButtons[mode] = button
+        button.MouseButton1Click:Connect(function()
+            if state.Running or state.Scanning then
+                return
+            end
+            state.Mode = mode
+            genv.AnyDumper_Mode = mode
+            updateAdvancedDefaults()
+            updateUI()
+        end)
+    end
+
+    ui.scanButton = new("TextButton", {
+        Size = UDim2.fromOffset(174, 34),
+        Position = UDim2.new(1, -192, 0, 116),
+        BackgroundColor3 = Color3.fromRGB(230, 232, 236),
+        BorderSizePixel = 0,
+        Text = "Scan Structure",
+        TextColor3 = Color3.fromRGB(18, 20, 24),
+        Font = Enum.Font.GothamSemibold,
+        TextSize = 11
+    }, frame)
+    new("UICorner", {CornerRadius = UDim.new(0, 8)}, ui.scanButton)
+
+    new("TextLabel", {
+        Size = UDim2.fromOffset(160, 18),
+        Position = UDim2.fromOffset(18, 164),
+        BackgroundTransparency = 1,
+        Text = "2  SELECT ROOTS",
+        TextColor3 = Color3.fromRGB(100, 106, 118),
+        Font = Enum.Font.GothamSemibold,
+        TextSize = 9,
+        TextXAlignment = Enum.TextXAlignment.Left
+    }, frame)
+
+    local tree = new("ScrollingFrame", {
+        Size = UDim2.new(1, -36, 0, 254),
+        Position = UDim2.fromOffset(18, 187),
+        BackgroundColor3 = Color3.fromRGB(18, 21, 26),
+        BorderSizePixel = 0,
+        ScrollBarThickness = 4,
+        ScrollBarImageColor3 = Color3.fromRGB(76, 84, 97),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        CanvasSize = UDim2.new()
+    }, frame)
+    new("UICorner", {CornerRadius = UDim.new(0, 9)}, tree)
+    new("UIStroke", {Color = Color3.fromRGB(39, 43, 52), Thickness = 1}, tree)
+    local layout = new("UIListLayout", {Padding = UDim.new(0, 0), SortOrder = Enum.SortOrder.LayoutOrder}, tree)
+    local padding = new("UIPadding", {PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 6)}, tree)
+
+    ui.rootButtons = {}
+    ui.rootCounts = {}
+    local currentGroup
+    local order = 0
+    for _, entry in ipairs(roots) do
+        if entry.Group ~= currentGroup then
+            currentGroup = entry.Group
+            order = order + 1
+            new("TextLabel", {
+                LayoutOrder = order,
+                Size = UDim2.new(1, -16, 0, 28),
+                BackgroundTransparency = 1,
+                Text = "   ▼  " .. string.upper(currentGroup),
+                TextColor3 = Color3.fromRGB(105, 112, 124),
+                Font = Enum.Font.GothamSemibold,
+                TextSize = 9,
+                TextXAlignment = Enum.TextXAlignment.Left
+            }, tree)
+        end
+        order = order + 1
+        local row = new("Frame", {
+            LayoutOrder = order,
+            Size = UDim2.new(1, -12, 0, 34),
+            BackgroundColor3 = Color3.fromRGB(21, 24, 30),
+            BorderSizePixel = 0
+        }, tree)
+        new("UIPadding", {PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 10)}, row)
+        local button = new("TextButton", {
+            Size = UDim2.new(0.56, 0, 1, 0),
+            BackgroundTransparency = 1,
+            Text = "",
+            TextColor3 = Color3.fromRGB(226, 230, 236),
+            Font = Enum.Font.Gotham,
+            TextSize = 11,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            AutoButtonColor = false
+        }, row)
+        local count = new("TextLabel", {
+            Size = UDim2.new(0.44, 0, 1, 0),
+            Position = UDim2.new(0.56, 0, 0, 0),
+            BackgroundTransparency = 1,
+            Text = "not scanned",
+            TextColor3 = Color3.fromRGB(111, 118, 130),
+            Font = Enum.Font.Code,
+            TextSize = 9,
+            TextXAlignment = Enum.TextXAlignment.Right
+        }, row)
+        ui.rootButtons[entry.Id] = button
+        ui.rootCounts[entry.Id] = count
+        button.MouseButton1Click:Connect(function()
+            if state.Running or state.Scanning then
+                return
+            end
+            entry.Selected = not entry.Selected
+            updateUI()
+        end)
+    end
+
+    new("TextLabel", {
+        Size = UDim2.fromOffset(160, 18),
+        Position = UDim2.fromOffset(18, 451),
+        BackgroundTransparency = 1,
+        Text = "3  ADVANCED",
+        TextColor3 = Color3.fromRGB(100, 106, 118),
+        Font = Enum.Font.GothamSemibold,
+        TextSize = 9,
+        TextXAlignment = Enum.TextXAlignment.Left
+    }, frame)
+
+    ui.optionButtons = {}
+    local optionDefs = {
+        {"Remotes", "Remotes"},
+        {"RuntimeLinked", "Runtime linked"},
+        {"Bytecode", "Bytecode"},
+        {"FullDump", "Full dump"},
+        {"LinkedNil", "Linked nil"}
+    }
+    for i, def in ipairs(optionDefs) do
+        local button = new("TextButton", {
+            Size = UDim2.fromOffset(i == 2 and 122 or 96, 28),
+            Position = UDim2.fromOffset(18 + (i - 1) * 112, 473),
+            BackgroundColor3 = Color3.fromRGB(22, 25, 31),
+            BorderSizePixel = 0,
+            Text = "",
+            TextColor3 = Color3.fromRGB(190, 196, 207),
+            Font = Enum.Font.Gotham,
+            TextSize = 9,
+            AutoButtonColor = false
+        }, frame)
+        button:SetAttribute("Label", def[2])
+        new("UICorner", {CornerRadius = UDim.new(0, 7)}, button)
+        new("UIStroke", {Color = Color3.fromRGB(39, 44, 53), Thickness = 1}, button)
+        ui.optionButtons[def[1]] = button
+        button.MouseButton1Click:Connect(function()
+            if state.Running or state.Scanning then
+                return
+            end
+            if state.Mode == "Strict" and (def[1] == "RuntimeLinked" or def[1] == "LinkedNil") then
+                return
+            end
+            options[def[1]] = not options[def[1]]
+            updateUI()
+        end)
+    end
+
+    local actions = new("Frame", {
+        Size = UDim2.new(1, -36, 0, 42),
+        Position = UDim2.fromOffset(18, 514),
+        BackgroundTransparency = 1
+    }, frame)
+
+    local recommended = new("TextButton", {
+        Size = UDim2.fromOffset(128, 36),
+        BackgroundColor3 = Color3.fromRGB(25, 29, 36),
+        BorderSizePixel = 0,
+        Text = "Recommended",
+        TextColor3 = Color3.fromRGB(201, 207, 217),
+        Font = Enum.Font.GothamSemibold,
+        TextSize = 10
+    }, actions)
+    new("UICorner", {CornerRadius = UDim.new(0, 8)}, recommended)
+
+    local clear = new("TextButton", {
+        Size = UDim2.fromOffset(82, 36),
+        Position = UDim2.fromOffset(136, 0),
+        BackgroundColor3 = Color3.fromRGB(25, 29, 36),
+        BorderSizePixel = 0,
+        Text = "Clear",
+        TextColor3 = Color3.fromRGB(201, 207, 217),
+        Font = Enum.Font.GothamSemibold,
+        TextSize = 10
+    }, actions)
+    new("UICorner", {CornerRadius = UDim.new(0, 8)}, clear)
+
+    ui.cancelButton = new("TextButton", {
+        Size = UDim2.fromOffset(82, 36),
+        Position = UDim2.new(1, -270, 0, 0),
+        BackgroundColor3 = Color3.fromRGB(48, 28, 33),
+        BorderSizePixel = 0,
+        Text = "Cancel",
+        TextColor3 = Color3.fromRGB(240, 162, 170),
+        Font = Enum.Font.GothamSemibold,
+        TextSize = 10,
+        Visible = false
+    }, actions)
+    new("UICorner", {CornerRadius = UDim.new(0, 8)}, ui.cancelButton)
+
+    ui.dumpButton = new("TextButton", {
+        Size = UDim2.fromOffset(180, 36),
+        Position = UDim2.new(1, -180, 0, 0),
+        BackgroundColor3 = Color3.fromRGB(230, 232, 236),
+        BorderSizePixel = 0,
+        Text = "Dump Selected",
+        TextColor3 = Color3.fromRGB(18, 20, 24),
+        Font = Enum.Font.GothamSemibold,
+        TextSize = 10
+    }, actions)
+    new("UICorner", {CornerRadius = UDim.new(0, 8)}, ui.dumpButton)
+
+    ui.path = new("TextLabel", {
+        Size = UDim2.new(1, -36, 0, 30),
+        Position = UDim2.fromOffset(18, 562),
+        BackgroundColor3 = Color3.fromRGB(18, 21, 26),
+        BorderSizePixel = 0,
+        Text = "No run folder yet",
+        TextColor3 = Color3.fromRGB(102, 110, 123),
+        Font = Enum.Font.Code,
+        TextSize = 9,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd
+    }, frame)
+    new("UICorner", {CornerRadius = UDim.new(0, 8)}, ui.path)
+    new("UIPadding", {PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10)}, ui.path)
+
+    local stats = new("Frame", {
+        Size = UDim2.fromOffset(218, 18),
+        Position = UDim2.new(1, -236, 0, 92),
+        BackgroundTransparency = 1
+    }, frame)
+    ui.codeValue = new("TextLabel", {Size = UDim2.fromOffset(50, 18), BackgroundTransparency = 1, Text = "0", TextColor3 = Color3.fromRGB(166, 172, 183), Font = Enum.Font.Code, TextSize = 9}, stats)
+    ui.remoteValue = new("TextLabel", {Size = UDim2.fromOffset(50, 18), Position = UDim2.fromOffset(54, 0), BackgroundTransparency = 1, Text = "0", TextColor3 = Color3.fromRGB(166, 172, 183), Font = Enum.Font.Code, TextSize = 9}, stats)
+    ui.runtimeValue = new("TextLabel", {Size = UDim2.fromOffset(50, 18), Position = UDim2.fromOffset(108, 0), BackgroundTransparency = 1, Text = "0", TextColor3 = Color3.fromRGB(166, 172, 183), Font = Enum.Font.Code, TextSize = 9}, stats)
+    ui.failedValue = new("TextLabel", {Size = UDim2.fromOffset(50, 18), Position = UDim2.fromOffset(162, 0), BackgroundTransparency = 1, Text = "0", TextColor3 = Color3.fromRGB(221, 139, 148), Font = Enum.Font.Code, TextSize = 9}, stats)
+
+    recommended.MouseButton1Click:Connect(function()
+        if state.Running or state.Scanning then
+            return
+        end
+        local recommendedIds = {
+            ReplicatedStorage = true,
+            ReplicatedFirst = true,
+            Workspace = true,
+            StarterPlayer = true,
+            StarterGui = true,
+            StarterPack = true,
+            Lighting = true,
+            SoundService = true,
+            PlayerScripts = true,
+            PlayerGui = true,
+            Backpack = true
+        }
+        for _, entry in ipairs(roots) do
+            entry.Selected = recommendedIds[entry.Id] == true
+        end
+        updateUI()
+    end)
+
+    clear.MouseButton1Click:Connect(function()
+        if state.Running or state.Scanning then
+            return
+        end
+        for _, entry in ipairs(roots) do
+            entry.Selected = false
+        end
+        updateUI()
+    end)
+
+    ui.cancelButton.MouseButton1Click:Connect(function()
+        state.Cancelled = true
+        state.Phase = "CANCELLING"
+        updateUI()
+    end)
+
+    local dragging = false
+    local dragStart
+    local startPosition
+    top.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPosition = frame.Position
+        end
+    end)
+    top.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            frame.Position = UDim2.new(startPosition.X.Scale, startPosition.X.Offset + delta.X, startPosition.Y.Scale, startPosition.Y.Offset + delta.Y)
+        end
+    end)
+
+    ui.gui = gui
+    ui.frame = frame
+    return gui
+end
+
+local function countRoot(entry)
+    local root = entry.Root()
+    if not root then
+        return {Scripts = 0, Remotes = 0, Total = 0}
+    end
+    local scripts = 0
+    local remotes = 0
+    local total = 0
+    local items = {root}
+    local ok, descendants = pcall(function()
+        return root:GetDescendants()
+    end)
+    if ok and type(descendants) == "table" then
+        for _, child in ipairs(descendants) do
+            items[#items + 1] = child
+        end
+    end
+    for index, instance in ipairs(items) do
+        if state.Cancelled then
+            break
+        end
+        local allowed, reason = instanceAllowed(instance, entry, root)
+        if allowed then
+            if isLua(instance) then
+                scripts = scripts + 1
+            elseif isRemote(instance) then
+                remotes = remotes + 1
+            end
+            total = total + 1
+        else
+            reject(reason)
+        end
+        if index % 800 == 0 then
+            task.wait()
+        end
+    end
+    return {Scripts = scripts, Remotes = remotes, Total = total}
+end
+
+local function scanStructure()
+    if state.Running or state.Scanning then
+        return
+    end
+    state.Scanning = true
+    state.Cancelled = false
+    state.Phase = "SCANNING STRUCTURE"
+    state.ScanReady = false
+    scanCache = {}
+    resetFilterStats()
+    state.Game = getGameName()
+    state.PlaceId = game.PlaceId
+    setText(ui.gameLine, state.Game .. "  ·  " .. tostring(state.PlaceId) .. "  ·  " .. state.Mode)
+    updateUI()
+    for _, entry in ipairs(roots) do
+        if state.Cancelled then
+            break
+        end
+        scanCache[entry.Id] = countRoot(entry)
+        updateUI()
+        task.wait()
+    end
+    state.Scanning = false
+    if state.Cancelled then
+        state.Phase = "CANCELLED"
+        state.ScanReady = false
+    else
+        state.Phase = "SELECT"
+        state.ScanReady = true
+    end
+    updateUI()
+end
+
+local function clearRunData()
+    state.Code = 0
+    state.Remotes = 0
+    state.Runtime = 0
+    state.Failed = 0
+    state.LastError = nil
+    errors = {}
+    codeIndex = {}
+    remoteIndex = {}
+    runtimeIndex = {Modules = {}, Functions = {}, Tables = {}, NilInstances = {}}
+    fullDumpEntries = {}
+    usedPaths = {}
+    acceptedScripts = {}
+    acceptedInstances = {}
+    acceptedFunctions = {}
+    linkedTables = {}
+    linkedNilInstances = {}
+    resetFilterStats()
+end
+
+local function selectedRoots()
+    local result = {}
+    for _, entry in ipairs(roots) do
+        if entry.Selected then
+            local root = entry.Root()
+            if root then
+                result[#result + 1] = {Entry = entry, Root = root}
+            end
+        end
+    end
+    return result
+end
+
+local function discoverSelectedScripts()
+    local scripts = {}
+    local seen = {}
+    for _, selected in ipairs(selectedRoots()) do
+        local entry = selected.Entry
+        local root = selected.Root
+        local items = {root}
+        local ok, descendants = pcall(function()
+            return root:GetDescendants()
+        end)
+        if ok and type(descendants) == "table" then
+            for _, child in ipairs(descendants) do
+                items[#items + 1] = child
+            end
+        end
+        for index, instance in ipairs(items) do
+            if state.Cancelled then
+                return scripts
+            end
+            if isLua(instance) and not seen[instance] then
+                filterStats.ScriptsDiscovered = filterStats.ScriptsDiscovered + 1
+                local allowed, reason = instanceAllowed(instance, entry, root)
+                if allowed then
+                    seen[instance] = true
+                    scripts[#scripts + 1] = {Instance = instance, Entry = entry, Root = root, Reason = reason}
+                    acceptedScripts[instance] = true
+                    acceptedInstances[instance] = true
+                    filterStats.ScriptsAccepted = filterStats.ScriptsAccepted + 1
+                else
+                    reject(reason)
+                end
+            end
+            if index % 700 == 0 then
+                updateUI()
+                task.wait()
+            end
+        end
+    end
+    return scripts
+end
+
+local function readScriptSource(instance)
+    local source
+    local method
+    local decompileError
+    if decompileFn then
+        local ok, result = pcall(decompileFn, instance)
+        if ok and type(result) == "string" and result ~= "" then
+            source = result
+            method = "decompile"
+        else
+            decompileError = result
+        end
+    end
+    if not source then
+        local ok, result = pcall(function()
+            return instance.Source
+        end)
+        if ok and type(result) == "string" and result ~= "" then
+            source = result
+            method = "Source"
+        end
+    end
+    return source, method, decompileError
+end
+
+local function dumpScript(item)
+    local instance = item.Instance
+    local fullName = safeFullName(instance)
+    local source, method, decompileError = readScriptSource(instance)
+    local row = {
+        Name = safeString(instance.Name),
+        Class = safeClass(instance),
+        FullName = fullName,
+        SelectedRoot = item.Entry.Id,
+        Origin = item.Entry.Group,
+        ReasonAccepted = item.Reason,
+        Method = method or "none",
+        File = nil,
+        Bytecode = nil,
+        Status = "FAILED"
+    }
+    if source then
+        local path = outputPath("code", item.Entry, item.Root, instance, ".luau")
+        local ok, err = writeVerified(path, source)
+        if ok then
+            row.File = path
+            row.Status = "OK"
+            state.Code = state.Code + 1
+            if options.FullDump then
+                fullDumpEntries[#fullDumpEntries + 1] = {
+                    Path = fullName,
+                    Root = item.Entry.Id,
+                    Class = safeClass(instance),
+                    Source = source
+                }
+            end
+        else
+            recordError("WRITE_CODE", fullName, err)
+        end
+    end
+    if options.Bytecode and bytecodeFn then
+        local okByte, bytecode = pcall(bytecodeFn, instance)
+        if okByte and type(bytecode) == "string" and bytecode ~= "" then
+            local path = outputPath("bytecode", item.Entry, item.Root, instance, ".bytecode")
+            local okWrite, errWrite = writeVerified(path, bytecode)
+            if okWrite then
+                row.Bytecode = path
+                if row.Status ~= "OK" then
+                    row.Status = "BYTECODE_ONLY"
+                    state.Code = state.Code + 1
+                end
+            else
+                recordError("WRITE_BYTECODE", fullName, errWrite)
+            end
+        end
+    end
+    if row.Status == "FAILED" then
+        recordError("DECOMPILE", fullName, decompileError or "no readable source")
+    end
+    codeIndex[#codeIndex + 1] = row
+end
+
+local function collectSelectedRemotes()
+    if not options.Remotes then
+        return
+    end
+    local seen = {}
+    for _, selected in ipairs(selectedRoots()) do
+        local entry = selected.Entry
+        local root = selected.Root
+        local items = {root}
+        local ok, descendants = pcall(function()
+            return root:GetDescendants()
+        end)
+        if ok and type(descendants) == "table" then
+            for _, child in ipairs(descendants) do
+                items[#items + 1] = child
+            end
+        end
+        for index, instance in ipairs(items) do
+            if state.Cancelled then
+                return
+            end
+            if isRemote(instance) and not seen[instance] then
+                filterStats.RemotesDiscovered = filterStats.RemotesDiscovered + 1
+                local allowed, reason = instanceAllowed(instance, entry, root)
+                if allowed then
+                    seen[instance] = true
+                    acceptedInstances[instance] = true
+                    local row = {
+                        Name = safeString(instance.Name),
+                        Class = safeClass(instance),
+                        FullName = safeFullName(instance),
+                        SelectedRoot = entry.Id,
+                        ReasonAccepted = reason,
+                        Attributes = {},
+                        ClientConnections = nil,
+                        HasClientInvoke = nil
+                    }
+                    pcall(function()
+                        row.Attributes = jsonSafe(instance:GetAttributes()) or {}
+                    end)
+                    if getconnectionsFn and safeClass(instance) ~= "RemoteFunction" then
+                        local okConnections, connections = pcall(function()
+                            return getconnectionsFn(instance.OnClientEvent)
+                        end)
+                        if okConnections and type(connections) == "table" then
+                            row.ClientConnections = #connections
+                        end
+                    elseif safeClass(instance) == "RemoteFunction" then
+                        pcall(function()
+                            row.HasClientInvoke = instance.OnClientInvoke ~= nil
+                        end)
+                    end
+                    remoteIndex[#remoteIndex + 1] = row
+                    state.Remotes = state.Remotes + 1
+                    filterStats.RemotesAccepted = filterStats.RemotesAccepted + 1
+                else
+                    reject(reason)
+                end
+            end
+            if index % 700 == 0 then
+                updateUI()
+                task.wait()
+            end
+        end
+    end
+end
+
+local function buildAcceptedSourceSet()
+    local set = {}
+    for instance in pairs(acceptedScripts) do
+        local full = normalizeSource(safeFullName(instance))
+        if full ~= "" then
+            set[full] = true
+            set["game." .. full] = true
+        end
+    end
+    return set
+end
+
+local function sourceLinked(source, set)
+    local rejected, rejectReason = sourceRejected(source)
+    if rejected then
+        return false, rejectReason
+    end
+    local normalized = normalizeSource(source)
+    if normalized == "" then
+        return false, "NoSource"
+    end
+    if set[normalized] then
+        return true, "AcceptedSource"
+    end
+    for token in pairs(set) do
+        if #token >= 8 and normalized:find(token, 1, true) then
+            return true, "AcceptedSourcePath"
+        end
+    end
+    if state.Mode == "Deep" then
+        local prefixes = {
+            "replicatedstorage.",
+            "replicatedfirst.",
+            "workspace.",
+            "starterplayer.",
+            "startergui.",
+            "starterpack.",
+            "lighting.",
+            "soundservice."
+        }
+        for _, prefix in ipairs(prefixes) do
+            if normalized:find(prefix, 1, true) == 1 then
+                return true, "DeepSource"
+            end
+        end
+    end
+    return false, "UnlinkedSource"
+end
+
+local function functionInfo(fn)
+    local row = {Name = nil, Source = nil, Arity = nil, Vararg = nil, Constants = nil, UpvalueCount = nil, Owner = nil, Ownership = nil}
+    if caps.debugInfo then
+        pcall(function()
+            row.Name = debug.info(fn, "n")
+        end)
+        pcall(function()
+            row.Source = debug.info(fn, "s")
+        end)
+        pcall(function()
+            local arity, vararg = debug.info(fn, "a")
+            row.Arity = arity
+            row.Vararg = vararg
+        end)
+    end
+    if getconstantsFn then
+        local ok, constants = pcall(getconstantsFn, fn)
+        if ok and type(constants) == "table" then
+            local interesting = {}
+            for _, value in ipairs(constants) do
+                if type(value) == "string" then
+                    local lower = string.lower(value)
+                    if lower:find("remote", 1, true) or lower:find("invoke", 1, true) or lower:find("fire", 1, true) or lower:find("network", 1, true) or lower:find("replica", 1, true) or lower:find("packet", 1, true) then
+                        interesting[#interesting + 1] = value
+                        if #interesting >= 20 then
+                            break
+                        end
+                    end
+                end
+            end
+            if #interesting > 0 then
+                row.Constants = interesting
+            end
+        end
+    end
+    if getupvaluesFn then
+        local ok, values = pcall(getupvaluesFn, fn)
+        if ok and type(values) == "table" then
+            local count = 0
+            for _ in pairs(values) do
+                count = count + 1
+            end
+            row.UpvalueCount = count
+        end
+    end
+    return row
+end
+
+local function envScript(fn)
+    if not getfenvFn then
+        return nil
+    end
+    local ok, environment = pcall(getfenvFn, fn)
+    if not ok or type(environment) ~= "table" then
+        return nil
+    end
+    local scriptValue
+    pcall(function()
+        scriptValue = rawget(environment, "script") or environment.script
+    end)
+    if (typeof and typeof(scriptValue) or type(scriptValue)) == "Instance" then
+        return scriptValue
+    end
+end
+
+local function functionOwnership(fn, info, sourceSet)
+    if isExecutorClosure(fn) then
+        return false, "ExecutorClosure", nil
+    end
+    local scriptValue = envScript(fn)
+    if scriptValue then
+        if acceptedScripts[scriptValue] then
+            return true, "EnvScript", safeFullName(scriptValue)
+        end
+        local entry, root = rootForInstance(scriptValue)
+        if entry and entry.Selected and root then
+            local allowed, reason = instanceAllowed(scriptValue, entry, root)
+            if allowed and isLua(scriptValue) then
+                return true, "EnvScript:" .. reason, safeFullName(scriptValue)
+            end
+        end
+        return false, "ForeignEnvScript", safeFullName(scriptValue)
+    end
+    local linked, reason = sourceLinked(info.Source, sourceSet)
+    if linked then
+        return true, reason, safeString(info.Source)
+    end
+    return false, reason, safeString(info.Source)
+end
+
+local function linkUpvalues(fn)
+    if not getupvaluesFn then
+        return
+    end
+    local ok, values = pcall(getupvaluesFn, fn)
+    if not ok or type(values) ~= "table" then
+        return
+    end
+    for _, value in pairs(values) do
+        local kind = typeof and typeof(value) or type(value)
+        if kind == "table" then
+            linkedTables[value] = linkedTables[value] or "AcceptedFunctionUpvalue"
+        elseif kind == "Instance" and not safeParent(value) then
+            linkedNilInstances[value] = linkedNilInstances[value] or "AcceptedFunctionUpvalue"
+        end
+    end
+end
+
+local function tableKeys(tbl)
+    local keys = {}
+    local count = 0
+    pcall(function()
+        for key in next, tbl do
+            count = count + 1
+            if #keys < 40 then
+                keys[#keys + 1] = safeString(key)
+            end
+            if count >= 100 then
+                break
+            end
+        end
+    end)
+    return keys
+end
+
+local function tableLinked(tbl)
+    if linkedTables[tbl] then
+        return true, linkedTables[tbl]
+    end
+    local reason
+    local scanned = 0
+    pcall(function()
+        for key, value in next, tbl do
+            scanned = scanned + 1
+            for _, candidate in ipairs({key, value}) do
+                local kind = typeof and typeof(candidate) or type(candidate)
+                if kind == "Instance" and acceptedInstances[candidate] then
+                    reason = "AcceptedInstance"
+                    break
+                end
+                if kind == "function" and acceptedFunctions[candidate] then
+                    reason = "AcceptedFunction"
+                    break
+                end
+                if kind == "table" and linkedTables[candidate] then
+                    reason = "LinkedTable"
+                    break
+                end
+            end
+            if reason or scanned >= 80 then
+                break
+            end
+        end
+    end)
+    return reason ~= nil, reason or "UnlinkedTable"
+end
+
+local function collectRuntime()
+    if not options.RuntimeLinked or state.Mode == "Strict" then
+        return
+    end
+
+    local selectedSet = {}
+    for instance in pairs(acceptedScripts) do
+        selectedSet[instance] = true
+    end
+
+    if getloadedmodulesFn then
+        local ok, modules = pcall(getloadedmodulesFn)
+        if ok and type(modules) == "table" then
+            for _, module in ipairs(modules) do
+                if state.Cancelled then
+                    return
+                end
+                filterStats.ModulesDiscovered = filterStats.ModulesDiscovered + 1
+                local entry, root = rootForInstance(module)
+                if entry and entry.Selected and root then
+                    local allowed, reason = instanceAllowed(module, entry, root)
+                    if allowed then
+                        runtimeIndex.Modules[#runtimeIndex.Modules + 1] = {
+                            Name = safeString(module.Name),
+                            FullName = safeFullName(module),
+                            SelectedRoot = entry.Id,
+                            ReasonAccepted = reason
+                        }
+                        acceptedInstances[module] = true
+                        filterStats.ModulesAccepted = filterStats.ModulesAccepted + 1
+                        state.Runtime = state.Runtime + 1
+                    else
+                        reject(reason)
+                    end
+                else
+                    reject("ModuleOutsideSelection")
+                end
+            end
+        else
+            recordError("RUNTIME", "getloadedmodules", modules)
+        end
+    end
+
+    for scriptInstance in pairs(selectedSet) do
+        if state.Cancelled then
+            return
+        end
+        if getsenvFn then
+            local ok, environment = pcall(getsenvFn, scriptInstance)
+            if ok and type(environment) == "table" then
+                linkedTables[environment] = linkedTables[environment] or "ScriptEnvironment"
+            end
+        end
+        local closure
+        if getscriptclosureFn then
+            local ok, result = pcall(getscriptclosureFn, scriptInstance)
+            if ok and type(result) == "function" then
+                closure = result
+            end
+        end
+        if not closure and getscriptfunctionFn then
+            local ok, result = pcall(getscriptfunctionFn, scriptInstance)
+            if ok and type(result) == "function" then
+                closure = result
+            end
+        end
+        if closure and not acceptedFunctions[closure] and not isExecutorClosure(closure) then
+            local info = functionInfo(closure)
+            info.Owner = safeFullName(scriptInstance)
+            info.Ownership = "DirectScriptClosure"
+            runtimeIndex.Functions[#runtimeIndex.Functions + 1] = info
+            acceptedFunctions[closure] = true
+            filterStats.RuntimeFunctionsAccepted = filterStats.RuntimeFunctionsAccepted + 1
+            state.Runtime = state.Runtime + 1
+            linkUpvalues(closure)
+        end
+    end
+
+    if getgcFn then
+        local sourceSet = buildAcceptedSourceSet()
+        local ok, objects = pcall(getgcFn, true)
+        if ok and type(objects) == "table" then
+            local functionScanLimit = state.Mode == "Deep" and 24000 or 12000
+            local tableScanLimit = state.Mode == "Deep" and 28000 or 14000
+            local functionAcceptedLimit = state.Mode == "Deep" and 5000 or 2500
+            local tableAcceptedLimit = state.Mode == "Deep" and 2400 or 1000
+            local functionScanned = 0
+            local functionAccepted = 0
+            for index, object in ipairs(objects) do
+                if state.Cancelled then
+                    return
+                end
+                if type(object) == "function" and not acceptedFunctions[object] and functionScanned < functionScanLimit and functionAccepted < functionAcceptedLimit then
+                    functionScanned = functionScanned + 1
+                    filterStats.RuntimeFunctionsScanned = filterStats.RuntimeFunctionsScanned + 1
+                    local info = functionInfo(object)
+                    local owned, ownership, owner = functionOwnership(object, info, sourceSet)
+                    if owned then
+                        info.Owner = owner
+                        info.Ownership = ownership
+                        runtimeIndex.Functions[#runtimeIndex.Functions + 1] = info
+                        acceptedFunctions[object] = true
+                        filterStats.RuntimeFunctionsAccepted = filterStats.RuntimeFunctionsAccepted + 1
+                        functionAccepted = functionAccepted + 1
+                        state.Runtime = state.Runtime + 1
+                        linkUpvalues(object)
+                    else
+                        reject(ownership)
+                    end
+                end
+                if index % 1300 == 0 then
+                    updateUI()
+                    task.wait()
+                end
+            end
+
+            local tableScanned = 0
+            local tableAccepted = 0
+            for index, object in ipairs(objects) do
+                if state.Cancelled then
+                    return
+                end
+                if type(object) == "table" and tableScanned < tableScanLimit and tableAccepted < tableAcceptedLimit then
+                    tableScanned = tableScanned + 1
+                    filterStats.RuntimeTablesScanned = filterStats.RuntimeTablesScanned + 1
+                    local linked, reason = tableLinked(object)
+                    if linked then
+                        runtimeIndex.Tables[#runtimeIndex.Tables + 1] = {Keys = tableKeys(object), Link = reason}
+                        linkedTables[object] = linkedTables[object] or reason
+                        filterStats.RuntimeTablesAccepted = filterStats.RuntimeTablesAccepted + 1
+                        tableAccepted = tableAccepted + 1
+                        state.Runtime = state.Runtime + 1
+                    else
+                        reject(reason)
+                    end
+                end
+                if index % 1300 == 0 then
+                    updateUI()
+                    task.wait()
+                end
+            end
+        else
+            recordError("RUNTIME", "getgc", objects)
+        end
+    end
+
+    if options.LinkedNil and getnilinstancesFn then
+        local ok, nils = pcall(getnilinstancesFn)
+        if ok and type(nils) == "table" then
+            for _, instance in ipairs(nils) do
+                if state.Cancelled then
+                    return
+                end
+                if isLua(instance) or isRemote(instance) then
+                    filterStats.NilDiscovered = filterStats.NilDiscovered + 1
+                    if linkedNilInstances[instance] then
+                        runtimeIndex.NilInstances[#runtimeIndex.NilInstances + 1] = {
+                            Name = safeString(instance.Name),
+                            Class = safeClass(instance),
+                            Link = linkedNilInstances[instance]
+                        }
+                        filterStats.NilAccepted = filterStats.NilAccepted + 1
+                        state.Runtime = state.Runtime + 1
+                    else
+                        reject("NilUnlinked")
+                    end
+                end
+            end
+        else
+            recordError("RUNTIME", "getnilinstances", nils)
+        end
+    end
+end
+
+local function buildFilterReport()
+    local lines = {
+        "any dumper filter report",
+        "credit: any ne",
+        "mode: " .. state.Mode,
+        "",
+        "scripts discovered: " .. tostring(filterStats.ScriptsDiscovered),
+        "scripts accepted: " .. tostring(filterStats.ScriptsAccepted),
+        "remotes discovered: " .. tostring(filterStats.RemotesDiscovered),
+        "remotes accepted: " .. tostring(filterStats.RemotesAccepted),
+        "modules discovered: " .. tostring(filterStats.ModulesDiscovered),
+        "modules accepted: " .. tostring(filterStats.ModulesAccepted),
+        "runtime functions scanned: " .. tostring(filterStats.RuntimeFunctionsScanned),
+        "runtime functions accepted: " .. tostring(filterStats.RuntimeFunctionsAccepted),
+        "runtime tables scanned: " .. tostring(filterStats.RuntimeTablesScanned),
+        "runtime tables accepted: " .. tostring(filterStats.RuntimeTablesAccepted),
+        "nil discovered: " .. tostring(filterStats.NilDiscovered),
+        "nil accepted: " .. tostring(filterStats.NilAccepted),
+        "",
+        "rejected:"
+    }
+    local keys = {}
+    for reason in pairs(filterStats.Rejected) do
+        keys[#keys + 1] = reason
+    end
+    table.sort(keys)
+    if #keys == 0 then
+        lines[#lines + 1] = "none"
+    else
+        for _, reason in ipairs(keys) do
+            lines[#lines + 1] = reason .. ": " .. tostring(filterStats.Rejected[reason])
+        end
+    end
+    return table.concat(lines, "\n")
+end
+
+local function buildErrorLog()
+    if #errors == 0 then
+        return "No errors recorded."
+    end
+    local lines = {}
+    for index, row in ipairs(errors) do
+        lines[#lines + 1] = "[" .. tostring(index) .. "] " .. row.Scope .. " | " .. row.Target .. " | " .. row.Error
+    end
+    return table.concat(lines, "\n")
+end
+
+local function buildFullDump()
+    local parts = {"return {"}
+    for _, entry in ipairs(fullDumpEntries) do
+        parts[#parts + 1] = "{Path=" .. luaQuote(entry.Path) .. ",Root=" .. luaQuote(entry.Root) .. ",Class=" .. luaQuote(entry.Class) .. ",Source=" .. longQuote(entry.Source) .. "},"
+    end
+    parts[#parts + 1] = "}"
+    return table.concat(parts, "\n")
+end
+
+local function buildCapabilities()
+    local result = {mode = state.Mode, executor = getExecutorName()}
+    for _, name in ipairs(capNames) do
+        result[name] = caps[name] == true
+    end
+    result.debugInfo = caps.debugInfo == true
+    return result
+end
+
+local function selectedRootManifest()
+    local result = {}
+    for _, entry in ipairs(roots) do
+        if entry.Selected then
+            local scan = scanCache[entry.Id]
+            result[#result + 1] = {
+                id = entry.Id,
+                group = entry.Group,
+                scripts = scan and scan.Scripts or nil,
+                remotes = scan and scan.Remotes or nil
+            }
+        end
+    end
+    return result
+end
+
+local function writeOutputs()
+    local files = {
+        {"_INDEX.luau", "return " .. serialize(codeIndex)},
+        {"_FILTER_REPORT.txt", buildFilterReport()},
+        {"_ERROR_LOG.txt", buildErrorLog()}
+    }
+    if options.Remotes then
+        files[#files + 1] = {"_REMOTE_MAP.luau", "return " .. serialize(remoteIndex)}
+    end
+    if options.RuntimeLinked then
+        files[#files + 1] = {"_RUNTIME_INDEX.luau", "return " .. serialize(runtimeIndex)}
+    end
+    if options.FullDump then
+        files[#files + 1] = {sanitize(state.Game) .. "_" .. tostring(state.PlaceId) .. "_FULL_DUMP.luau", buildFullDump()}
+    end
+
+    local manifest = {
+        name = "any dumper",
+        credit = "any ne",
+        game = state.Game,
+        placeId = state.PlaceId,
+        placeVersion = nil,
+        jobId = game.JobId,
+        executor = getExecutorName(),
+        mode = state.Mode,
+        runRoot = state.RunRoot,
+        generatedAt = os.time(),
+        durationSeconds = math.max(0, state.FinishedAt - state.StartedAt),
+        selectedRoots = selectedRootManifest(),
+        options = jsonSafe(options),
+        counts = {code = state.Code, remotes = state.Remotes, runtime = state.Runtime, failed = state.Failed},
+        filter = jsonSafe(filterStats)
+    }
+    pcall(function()
+        manifest.placeVersion = game.PlaceVersion
+    end)
+    local okManifest, manifestJson = pcall(function()
+        return HttpService:JSONEncode(manifest)
+    end)
+    if okManifest then
+        files[#files + 1] = {"_MANIFEST.json", manifestJson}
+    else
+        recordError("JSON", "manifest", manifestJson)
+    end
+    local okCaps, capsJson = pcall(function()
+        return HttpService:JSONEncode(buildCapabilities())
+    end)
+    if okCaps then
+        files[#files + 1] = {"_CAPABILITIES.json", capsJson}
+    end
+
+    for _, file in ipairs(files) do
+        local ok, err = writeVerified(state.RunRoot .. "/" .. file[1], file[2])
+        if not ok then
+            recordError("WRITE_CORE", file[1], err)
+        end
+    end
+
+    local status = table.concat({
+        "any dumper",
+        "credit: any ne",
+        "phase: " .. state.Phase,
+        "mode: " .. state.Mode,
+        "game: " .. state.Game,
+        "placeId: " .. tostring(state.PlaceId),
+        "runRoot: " .. state.RunRoot,
+        "code: " .. tostring(state.Code),
+        "remotes: " .. tostring(state.Remotes),
+        "runtime: " .. tostring(state.Runtime),
+        "failed: " .. tostring(state.Failed),
+        "duration: " .. string.format("%.2fs", math.max(0, state.FinishedAt - state.StartedAt))
+    }, "\n")
+    writeVerified(state.RunRoot .. "/_DUMP_STATUS.txt", status)
+end
+
+local function storeMemoryFallback()
+    genv.AnyDumper_Output = {
+        RunRoot = state.RunRoot,
+        Index = codeIndex,
+        Remotes = remoteIndex,
+        Runtime = runtimeIndex,
+        Filter = jsonSafe(filterStats),
+        Errors = errors
+    }
+end
+
+local function runDump()
+    if state.Running or state.Scanning or not state.ScanReady then
+        return false
+    end
+    local chosen = selectedRoots()
+    if #chosen == 0 then
+        state.Phase = "SELECT ROOTS"
+        updateUI()
+        return false
+    end
+
+    state.Running = true
+    state.Cancelled = false
+    state.Phase = "PREPARING"
+    state.StartedAt = os.clock()
+    state.FinishedAt = 0
+    clearRunData()
+    state.Game = getGameName()
+    state.PlaceId = game.PlaceId
+    state.RunRoot = makeRunRoot()
+    updateUI()
+
+    local fileReady = caps.writefile and caps.makefolder
+    if fileReady then
+        local okFolder, folderErr = ensureFolder(state.RunRoot)
+        if not okFolder then
+            fileReady = false
+            recordError("FILESYSTEM", state.RunRoot, folderErr)
+        end
+    end
+
+    state.Phase = "DISCOVERING"
+    updateUI()
+    local scripts = discoverSelectedScripts()
+
+    state.Phase = "DUMPING CODE"
+    updateUI()
+    for index, item in ipairs(scripts) do
+        if state.Cancelled then
+            break
+        end
+        if fileReady then
+            dumpScript(item)
+        else
+            local source, method, decompileError = readScriptSource(item.Instance)
+            local fullName = safeFullName(item.Instance)
+            local row = {
+                Name = safeString(item.Instance.Name),
+                Class = safeClass(item.Instance),
+                FullName = fullName,
+                SelectedRoot = item.Entry.Id,
+                Origin = item.Entry.Group,
+                ReasonAccepted = item.Reason,
+                Method = method or "none",
+                Status = source and "MEMORY" or "FAILED"
+            }
+            codeIndex[#codeIndex + 1] = row
+            if source then
+                state.Code = state.Code + 1
+                if options.FullDump then
+                    fullDumpEntries[#fullDumpEntries + 1] = {Path = fullName, Root = item.Entry.Id, Class = safeClass(item.Instance), Source = source}
+                end
+            else
+                recordError("DECOMPILE", fullName, decompileError or "no readable source")
+            end
+        end
+        if index % 18 == 0 then
+            updateUI()
+            task.wait()
+        end
+    end
+
+    if not state.Cancelled then
+        state.Phase = "REMOTES"
+        updateUI()
+        collectSelectedRemotes()
+    end
+
+    if not state.Cancelled then
+        state.Phase = "RUNTIME"
+        updateUI()
+        collectRuntime()
+    end
+
+    state.FinishedAt = os.clock()
+    if state.Cancelled then
+        state.Phase = "CANCELLED"
+    elseif state.Failed > 0 then
+        state.Phase = "COMPLETE*"
+    else
+        state.Phase = "COMPLETE"
+    end
+
+    if fileReady then
+        state.Phase = state.Cancelled and "CANCELLED" or "WRITING"
+        updateUI()
+        writeOutputs()
+        state.Phase = state.Cancelled and "CANCELLED" or (state.Failed > 0 and "COMPLETE*" or "COMPLETE")
+    else
+        storeMemoryFallback()
+    end
+
+    state.Running = false
+    updateUI()
+    return true
+end
+
+buildUI()
+updateAdvancedDefaults()
+updateUI()
+
+ui.scanButton.MouseButton1Click:Connect(function()
+    if not state.Running and not state.Scanning then
+        task.spawn(scanStructure)
+    end
 end)
 
-for _, remote in ipairs(remoteInstances) do
-	table.insert(manifest.remotes, {
-		name = remote.Name,
-		class_name = remote.ClassName,
-		full_name = remote:GetFullName()
-	})
-end
+ui.dumpButton.MouseButton1Click:Connect(function()
+    if state.ScanReady and not state.Running and not state.Scanning then
+        task.spawn(function()
+            local ok, err = pcall(runDump)
+            if not ok then
+                state.Running = false
+                state.Phase = "FAILED"
+                recordError("FATAL", "runDump", err)
+                updateUI()
+            end
+        end)
+    end
+end)
 
-local pending = {}
-local queued = {}
-local processed = {}
-
-local function queue(instance)
-	if not instance or queued[instance] or processed[instance] then
-		return
-	end
-
-	if not isAllowed(instance) then
-		return
-	end
-
-	if not isClientScript(instance) and not instance:IsA("ModuleScript") then
-		return
-	end
-
-	queued[instance] = true
-	table.insert(pending, instance)
-end
-
-local seedRoots = {
-	ReplicatedFirst,
-	StarterPlayer,
-	StarterGui,
-	StarterPack,
-	ReplicatedStorage
+genv.AnyDumper = {
+    Scan = function()
+        if state.Running or state.Scanning then
+            return false, "busy"
+        end
+        task.spawn(scanStructure)
+        return true
+    end,
+    Run = function()
+        if state.Running or state.Scanning or not state.ScanReady then
+            return false, "scan structure first"
+        end
+        task.spawn(runDump)
+        return true
+    end,
+    Cancel = function()
+        state.Cancelled = true
+        return true
+    end,
+    SetMode = function(mode)
+        if state.Running or state.Scanning then
+            return false, "busy"
+        end
+        local normalized = string.lower(safeString(mode))
+        if normalized == "strict" then
+            state.Mode = "Strict"
+        elseif normalized == "deep" then
+            state.Mode = "Deep"
+        else
+            state.Mode = "Balanced"
+        end
+        genv.AnyDumper_Mode = state.Mode
+        updateAdvancedDefaults()
+        updateUI()
+        return true, state.Mode
+    end,
+    GetStatus = function()
+        return {
+            Running = state.Running,
+            Scanning = state.Scanning,
+            Phase = state.Phase,
+            Mode = state.Mode,
+            BaseRoot = state.BaseRoot,
+            RunRoot = state.RunRoot,
+            Code = state.Code,
+            Remotes = state.Remotes,
+            Runtime = state.Runtime,
+            Failed = state.Failed,
+            ScanReady = state.ScanReady,
+            LastError = state.LastError
+        }
+    end,
+    GetScan = function()
+        return jsonSafe(scanCache)
+    end,
+    GetFilterReport = function()
+        return buildFilterReport()
+    end,
+    GetCapabilities = function()
+        return buildCapabilities()
+    end,
+    Destroy = function()
+        state.Cancelled = true
+        pcall(function()
+            if ui.gui then
+                ui.gui:Destroy()
+            end
+        end)
+        genv.AnyDumper = nil
+    end
 }
-
-for _, root in ipairs(seedRoots) do
-	for _, instance in ipairs(root:GetDescendants()) do
-		if isClientScript(instance) then
-			queue(instance)
-		elseif instance:IsA("ModuleScript") then
-			if not instance:IsDescendantOf(ReplicatedStorage) then
-				queue(instance)
-			end
-		end
-	end
-end
-
-while #pending > 0 do
-	local instance = table.remove(pending, 1)
-	queued[instance] = nil
-
-	if processed[instance] then
-		continue
-	end
-
-	processed[instance] = true
-
-	local isModule = instance:IsA("ModuleScript")
-	local collection = isModule and manifest.modules or manifest.scripts
-
-	if isModule then
-		manifest.statistics.modules_found += 1
-	else
-		manifest.statistics.scripts_found += 1
-	end
-
-	local source, sourceMethod, sourceError = readSource(instance)
-
-	if not source then
-		if isModule then
-			manifest.statistics.modules_failed += 1
-		else
-			manifest.statistics.scripts_failed += 1
-		end
-
-		table.insert(collection, {
-			name = instance.Name,
-			class_name = instance.ClassName,
-			full_name = instance:GetFullName(),
-			origin = classifyOrigin(instance),
-			status = "failed",
-			error = sourceError
-		})
-
-		table.insert(manifest.errors, {
-			full_name = instance:GetFullName(),
-			error = sourceError
-		})
-
-		continue
-	end
-
-	local dependencies, resolvedModules = extractDependencies(instance, source)
-	local functions = extractFunctions(source)
-	local events = extractEvents(source)
-	local stateAccess = extractStateAccess(source)
-	local remoteReferences = extractRemoteReferences(source)
-	local entryPoints = determineEntryPoints(functions)
-
-	local analysis = {
-		dependencies = dependencies,
-		functions = functions,
-		events = events,
-		state_access = stateAccess,
-		remote_references = remoteReferences,
-		entry_points = entryPoints
-	}
-
-	for _, dependency in ipairs(resolvedModules) do
-		queue(dependency)
-	end
-
-	local content = buildContent(instance, source, sourceMethod, analysis)
-	local file = createFile(isModule and modulesOutput or scriptsOutput, instance, content)
-
-	local dependencyManifest = {}
-
-	for _, dependency in ipairs(dependencies) do
-		table.insert(dependencyManifest, {
-			expression = dependency.expression,
-			resolved = dependency.resolved,
-			full_name = dependency.full_name
-		})
-	end
-
-	local remoteManifest = {}
-
-	for _, remote in ipairs(remoteReferences) do
-		table.insert(remoteManifest, remote.full_name)
-	end
-
-	table.insert(collection, {
-		name = instance.Name,
-		class_name = instance.ClassName,
-		full_name = instance:GetFullName(),
-		output_path = file:GetFullName(),
-		origin = classifyOrigin(instance),
-		source_method = sourceMethod,
-		status = "success",
-		dependencies = dependencyManifest,
-		remote_references = remoteManifest,
-		events = events,
-		important_functions = functions,
-		entry_points = entryPoints
-	})
-
-	if isModule then
-		manifest.statistics.modules_dumped += 1
-	else
-		manifest.statistics.scripts_dumped += 1
-	end
-end
-
-local remotesFile = Instance.new("StringValue")
-remotesFile.Name = "remotes.json"
-remotesFile.Value = HttpService:JSONEncode(manifest.remotes)
-remotesFile.Parent = remotesOutput
-
-local manifestFile = Instance.new("StringValue")
-manifestFile.Name = "manifest.json"
-manifestFile.Value = HttpService:JSONEncode(manifest)
-manifestFile.Parent = output
-
-local interesting = {}
-local remoteHeavy = {}
-
-local function inspectEntries(entries)
-	for _, entry in ipairs(entries) do
-		if entry.status == "success" then
-			local lowered = string.lower(entry.name)
-
-			if lowered:find("controller", 1, true)
-				or lowered:find("combat", 1, true)
-				or lowered:find("inventory", 1, true)
-				or lowered:find("quest", 1, true)
-				or lowered:find("movement", 1, true)
-				or lowered:find("data", 1, true)
-				or lowered:find("character", 1, true)
-			then
-				table.insert(interesting, entry.full_name)
-			end
-
-			if entry.remote_references and #entry.remote_references > 0 then
-				table.insert(remoteHeavy, entry.full_name .. " [" .. #entry.remote_references .. "]")
-			end
-		end
-	end
-end
-
-inspectEntries(manifest.scripts)
-inspectEntries(manifest.modules)
-
-table.sort(interesting)
-table.sort(remoteHeavy)
-
-local indexLines = {
-	"Any Dumper Studio Export",
-	"",
-	"Game: " .. game.Name,
-	"PlaceId: " .. tostring(game.PlaceId),
-	"Scope: client_static",
-	"",
-	"Local/Client Scripts Found: " .. manifest.statistics.scripts_found,
-	"Local/Client Scripts Dumped: " .. manifest.statistics.scripts_dumped,
-	"Local/Client Scripts Failed: " .. manifest.statistics.scripts_failed,
-	"Modules Found: " .. manifest.statistics.modules_found,
-	"Modules Dumped: " .. manifest.statistics.modules_dumped,
-	"Modules Failed: " .. manifest.statistics.modules_failed,
-	"Remotes Found: " .. manifest.statistics.remotes_found,
-	"",
-	"Interesting Scripts:"
-}
-
-if #interesting == 0 then
-	table.insert(indexLines, "- None")
-else
-	for _, value in ipairs(interesting) do
-		table.insert(indexLines, "- " .. value)
-	end
-end
-
-table.insert(indexLines, "")
-table.insert(indexLines, "Remote-heavy Scripts:")
-
-if #remoteHeavy == 0 then
-	table.insert(indexLines, "- None")
-else
-	for _, value in ipairs(remoteHeavy) do
-		table.insert(indexLines, "- " .. value)
-	end
-end
-
-local indexFile = Instance.new("StringValue")
-indexFile.Name = "INDEX.txt"
-indexFile.Value = table.concat(indexLines, "\n")
-indexFile.Parent = output
-
-print("Any Dumper finished")
-print("Output:", output:GetFullName())
-print("Scripts:", manifest.statistics.scripts_dumped, "/", manifest.statistics.scripts_found)
-print("Modules:", manifest.statistics.modules_dumped, "/", manifest.statistics.modules_found)
-print("Remotes:", manifest.statistics.remotes_found)
