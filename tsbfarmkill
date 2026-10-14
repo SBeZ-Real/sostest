@@ -7,9 +7,146 @@ getgenv().ScriptExecuted = true
 if not game:IsLoaded() then
 	game.Loaded:Wait()
 end
-task.wait(10)
+
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TeleportService = game:GetService("TeleportService")
+local GuiService = game:GetService("GuiService")
+
+local localPlayer = Players.LocalPlayer
+while not localPlayer do
+	task.wait()
+	localPlayer = Players.LocalPlayer
+end
+
+local function uiCreate(className, props, parent)
+	local instance = Instance.new(className)
+	for key, value in pairs(props or {}) do
+		instance[key] = value
+	end
+	instance.Parent = parent
+	return instance
+end
+
+local function uiCorner(parent, radius)
+	return uiCreate("UICorner", { CornerRadius = UDim.new(0, radius or 10) }, parent)
+end
+
+local function uiStroke(parent, transparency, color, thickness)
+	return uiCreate("UIStroke", {
+		Color = color or Color3.fromRGB(168, 85, 247),
+		Thickness = thickness or 1,
+		Transparency = transparency or 0.25,
+	}, parent)
+end
+
+local uiParent = game:GetService("CoreGui")
+if type(gethui) == "function" then
+	local ok, result = pcall(gethui)
+	if ok and result then
+		uiParent = result
+	end
+end
+
+local existing = uiParent:FindFirstChild("AnyTSBFarmUI")
+if existing then
+	pcall(function()
+		existing:Destroy()
+	end)
+end
+
+local screenGui = uiCreate("ScreenGui", {
+	Name = "AnyTSBFarmUI",
+	ResetOnSpawn = false,
+	IgnoreGuiInset = true,
+	DisplayOrder = 999,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+}, uiParent)
+
+do
+	local introCard = uiCreate("Frame", {
+		Size = UDim2.fromOffset(320, 112),
+		Position = UDim2.fromScale(0.5, 0.5),
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		BackgroundColor3 = Color3.fromRGB(13, 10, 20),
+		BorderSizePixel = 0,
+	}, screenGui)
+	uiCorner(introCard, 16)
+	local introStroke = uiStroke(introCard, 0.1, Color3.fromRGB(175, 95, 255), 1.5)
+	uiCreate("UIGradient", {
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(192, 132, 252)),
+			ColorSequenceKeypoint.new(0.5, Color3.fromRGB(139, 92, 246)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(88, 28, 135)),
+		}),
+	}, introStroke)
+
+	uiCreate("TextLabel", {
+		Size = UDim2.new(1, -32, 0, 24),
+		Position = UDim2.fromOffset(16, 14),
+		BackgroundTransparency = 1,
+		Text = "ANY TSB FARM",
+		Font = Enum.Font.GothamBold,
+		TextSize = 18,
+		TextColor3 = Color3.fromRGB(245, 240, 255),
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, introCard)
+
+	local introStatus = uiCreate("TextLabel", {
+		Size = UDim2.new(1, -32, 0, 18),
+		Position = UDim2.fromOffset(16, 40),
+		BackgroundTransparency = 1,
+		Text = "Initializing combat core · 10s",
+		Font = Enum.Font.GothamMedium,
+		TextSize = 12,
+		TextColor3 = Color3.fromRGB(178, 158, 210),
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, introCard)
+
+	local barTrack = uiCreate("Frame", {
+		Size = UDim2.new(1, -32, 0, 8),
+		Position = UDim2.fromOffset(16, 76),
+		BackgroundColor3 = Color3.fromRGB(28, 20, 42),
+		BorderSizePixel = 0,
+	}, introCard)
+	uiCorner(barTrack, 4)
+
+	local barFill = uiCreate("Frame", {
+		Size = UDim2.fromScale(0, 1),
+		BackgroundColor3 = Color3.fromRGB(168, 85, 247),
+		BorderSizePixel = 0,
+	}, barTrack)
+	uiCorner(barFill, 4)
+	uiCreate("UIGradient", {
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(139, 92, 246)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(217, 70, 239)),
+		}),
+	}, barFill)
+
+	TweenService:Create(barFill, TweenInfo.new(10, Enum.EasingStyle.Linear), {
+		Size = UDim2.fromScale(1, 1),
+	}):Play()
+
+	for sec = 10, 1, -1 do
+		introStatus.Text = string.format("Script active · Starting in %ds...", sec)
+		task.wait(1)
+	end
+
+	introStatus.Text = "System Ready!"
+	TweenService:Create(introCard, TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+		Size = UDim2.fromOffset(260, 38),
+		Position = UDim2.new(0.5, 0, 0, 14),
+		BackgroundTransparency = 1,
+	}):Play()
+	TweenService:Create(introStroke, TweenInfo.new(0.25), { Transparency = 1 }):Play()
+	task.wait(0.25)
+	introCard:Destroy()
+end
+
 local flag = false
 local flag2 = true
 
@@ -93,53 +230,34 @@ task.spawn(function()
 			RunService.Heartbeat:Wait()
 		end
 	end)
-
-	print("[Any TSB Farm] Super Fix Lag Activated!")
 end)
 
-local tbl
-
-tbl = {
-	"France",
-	"Netherlands",
-	"United States",
-	"United Kingdom",
-	"Australia",
-	"Germany",
-	"India",
-	"Brazil",
+local tbl = {
 	"Singapore",
 	"Japan",
+	"United States",
+	"Germany",
+	"Netherlands",
+	"France",
+	"United Kingdom",
+	"Australia",
+	"India",
+	"Brazil",
 }
 
-local tbl2 = {
-	Background = Color3.fromRGB(17, 18, 23),
-	Panel = Color3.fromRGB(26, 27, 34),
-	PanelAlt = Color3.fromRGB(33, 34, 43),
-	Stroke = Color3.fromRGB(50, 51, 63),
-	TextPrimary = Color3.fromRGB(240, 240, 245),
-	TextDim = Color3.fromRGB(145, 146, 158),
-	Amber = Color3.fromRGB(240, 170, 60),
-	Teal = Color3.fromRGB(70, 200, 190),
-	Rose = Color3.fromRGB(225, 95, 110),
-	Lavender = Color3.fromRGB(150, 130, 235),
-	FarmOn = Color3.fromRGB(70, 200, 130),
-	FarmOff = Color3.fromRGB(200, 70, 80),
-}
-
-local flag3
-flag3 = true
-local HttpService
-HttpService = game:GetService("HttpService")
+local flag3 = true
 local v, fn
 
 do
 	local root = "AnyHub"
 	local product = "AnyHub/TSBFarm"
-	local str = product .. "/" .. game:GetService("Players").LocalPlayer.Name
+	local str = product .. "/" .. localPlayer.Name
 	local str2 = str .. "/settings.json"
 
 	local function fn2()
+		if type(isfolder) ~= "function" or type(makefolder) ~= "function" then
+			return false
+		end
 		if not isfolder(root) then
 			makefolder(root)
 		end
@@ -149,33 +267,31 @@ do
 		if not isfolder(str) then
 			makefolder(str)
 		end
+		return true
 	end
 
 	v = table.clone({ country = "Singapore", webhookUrl = "" })
 
 	fn = function()
-		fn2()
+		if not fn2() or type(writefile) ~= "function" then
+			return
+		end
 		local ok, result = pcall(HttpService.JSONEncode, HttpService, v)
 		if ok then
-			writefile(str2, result)
-		else
-			warn("[Any TSB Farm] Failed to encode settings:", result)
+			pcall(writefile, str2, result)
 		end
 	end
 
 	local function fn3()
-		fn2()
-		if not isfile(str2) then
+		if not fn2() or type(isfile) ~= "function" or not isfile(str2) then
 			return
 		end
 		local ok, result = pcall(readfile, str2)
 		if not ok then
-			warn("[Any TSB Farm] Failed to read settings file:", result)
 			return
 		end
 		local ok2, result2 = pcall(HttpService.JSONDecode, HttpService, result)
 		if not ok2 or type(result2) ~= "table" then
-			warn("[Any TSB Farm] Failed to decode settings file, using defaults")
 			return
 		end
 		if type(result2.country) == "string" then
@@ -193,77 +309,81 @@ getgenv().TimeFarmed = getgenv().TimeFarmed or 0
 getgenv().session_start = getgenv().session_start or os.time()
 getgenv().carriedKills = getgenv().carriedKills or 0
 getgenv().emotes = getgenv().emotes or 0
-local fn2
 
-fn2 = function(arg, arg2, arg3, arg4, arg5)
-	local tween = TweenService:Create(arg, TweenInfo.new(arg3, arg4 or Enum.EasingStyle.Quint, arg5 or Enum.EasingDirection.Out), arg2)
-	tween:Play()
-	return tween
-end
-
-local function uiCreate(className, props, parent)
-	local instance = Instance.new(className)
-	for key, value in pairs(props or {}) do
-		instance[key] = value
-	end
-	instance.Parent = parent
-	return instance
-end
-
-local function uiCorner(parent, radius)
-	return uiCreate("UICorner", { CornerRadius = UDim.new(0, radius or 10) }, parent)
-end
-
-local function uiStroke(parent, transparency)
-	return uiCreate("UIStroke", { Color = Color3.fromRGB(65, 70, 84), Thickness = 1, Transparency = transparency or 0.2 }, parent)
-end
-
-local uiParent = game:GetService("CoreGui")
-if type(gethui) == "function" then
-	local ok, result = pcall(gethui)
-	if ok and result then
-		uiParent = result
-	end
-end
-
-local existing = uiParent:FindFirstChild("AnyTSBFarmUI")
-if existing then
-	pcall(function()
-		existing:Destroy()
-	end)
-end
-
-local screenGui = uiCreate("ScreenGui", {
-	Name = "AnyTSBFarmUI",
-	ResetOnSpawn = false,
-	IgnoreGuiInset = true,
-	DisplayOrder = 999,
-	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-}, uiParent)
-
-local shadow = uiCreate("Frame", {
-	Size = UDim2.fromOffset(728, 408),
-	Position = UDim2.new(0.5, 6, 0.5, 8),
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	BackgroundColor3 = Color3.fromRGB(0, 0, 0),
-	BackgroundTransparency = 0.55,
+local islandBar = uiCreate("TextButton", {
+	Size = UDim2.fromOffset(276, 36),
+	Position = UDim2.new(0.5, 0, 0, 12),
+	AnchorPoint = Vector2.new(0.5, 0),
+	BackgroundColor3 = Color3.fromRGB(13, 10, 20),
 	BorderSizePixel = 0,
+	Text = "",
+	AutoButtonColor = false,
+	ZIndex = 40,
 }, screenGui)
-uiCorner(shadow, 18)
+uiCorner(islandBar, 18)
+local islandStroke = uiStroke(islandBar, 0.15, Color3.fromRGB(168, 85, 247), 1.4)
+uiCreate("UIGradient", {
+	Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(192, 132, 252)),
+		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(168, 85, 247)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(217, 70, 239)),
+	}),
+}, islandStroke)
+
+local islandDot = uiCreate("Frame", {
+	Size = UDim2.fromOffset(8, 8),
+	Position = UDim2.new(0, 14, 0.5, -4),
+	BackgroundColor3 = Color3.fromRGB(192, 132, 252),
+	BorderSizePixel = 0,
+	ZIndex = 41,
+}, islandBar)
+uiCorner(islandDot, 4)
+
+local islandText = uiCreate("TextLabel", {
+	Size = UDim2.new(1, -54, 1, 0),
+	Position = UDim2.fromOffset(30, 0),
+	BackgroundTransparency = 1,
+	Text = "00:00:00  ·  0 KILLS  ·  0/HR",
+	Font = Enum.Font.GothamBold,
+	TextSize = 11,
+	TextColor3 = Color3.fromRGB(242, 236, 255),
+	TextXAlignment = Enum.TextXAlignment.Left,
+	ZIndex = 41,
+}, islandBar)
+
+local islandHint = uiCreate("TextLabel", {
+	Size = UDim2.fromOffset(20, 20),
+	Position = UDim2.new(1, -24, 0.5, -10),
+	BackgroundTransparency = 1,
+	Text = "▾",
+	Font = Enum.Font.GothamBold,
+	TextSize = 12,
+	TextColor3 = Color3.fromRGB(192, 132, 252),
+	ZIndex = 41,
+}, islandBar)
 
 local frame2 = uiCreate("Frame", {
-	Size = UDim2.fromOffset(728, 408),
-	Position = UDim2.new(0.5, 0, 0.5, 0),
+	Size = UDim2.fromOffset(480, 292),
+	Position = UDim2.new(0.5, 0, 0.5, 16),
 	AnchorPoint = Vector2.new(0.5, 0.5),
-	BackgroundColor3 = Color3.fromRGB(13, 15, 20),
+	BackgroundColor3 = Color3.fromRGB(12, 10, 19),
 	BorderSizePixel = 0,
 	Active = true,
+	Visible = true,
 }, screenGui)
-uiCorner(frame2, 18)
-uiStroke(frame2, 0.1)
+uiCorner(frame2, 16)
+local mainStroke = uiStroke(frame2, 0.12, Color3.fromRGB(168, 85, 247), 1.5)
+uiCreate("UIGradient", {
+	Rotation = 35,
+	Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(192, 132, 252)),
+		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(124, 58, 237)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(217, 70, 239)),
+	}),
+}, mainStroke)
 
 local uiScale = uiCreate("UIScale", { Scale = 1 }, frame2)
-local shadowScale = uiCreate("UIScale", { Scale = 1 }, shadow)
+local islandScale = uiCreate("UIScale", { Scale = 1 }, islandBar)
 local scaleConnection
 local function updateUiScale()
 	local camera = workspace.CurrentCamera
@@ -271,9 +391,9 @@ local function updateUiScale()
 		return
 	end
 	local viewport = camera.ViewportSize
-	local value = math.clamp(math.min(viewport.X / 780, viewport.Y / 470), 0.68, 1)
+	local value = math.clamp(math.min(viewport.X / 530, viewport.Y / 350), 0.72, 1.05)
 	uiScale.Scale = value
-	shadowScale.Scale = value
+	islandScale.Scale = math.clamp(value, 0.82, 1)
 end
 local function bindUiCamera()
 	if scaleConnection then
@@ -292,57 +412,72 @@ bindUiCamera()
 workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(bindUiCamera)
 
 local header = uiCreate("Frame", {
-	Size = UDim2.new(1, -28, 0, 56),
-	Position = UDim2.fromOffset(14, 12),
-	BackgroundColor3 = Color3.fromRGB(18, 21, 28),
+	Size = UDim2.new(1, -24, 0, 46),
+	Position = UDim2.fromOffset(12, 12),
+	BackgroundColor3 = Color3.fromRGB(19, 15, 30),
 	BorderSizePixel = 0,
 	Active = true,
 }, frame2)
-uiCorner(header, 12)
-uiStroke(header, 0.45)
+uiCorner(header, 11)
+uiStroke(header, 0.55, Color3.fromRGB(147, 51, 234))
 
 uiCreate("TextLabel", {
-	Size = UDim2.new(0, 280, 0, 24),
-	Position = UDim2.fromOffset(16, 8),
+	Size = UDim2.fromOffset(200, 20),
+	Position = UDim2.fromOffset(14, 6),
 	BackgroundTransparency = 1,
 	Text = "ANY TSB FARM",
 	Font = Enum.Font.GothamBold,
-	TextSize = 20,
-	TextColor3 = Color3.fromRGB(244, 246, 251),
+	TextSize = 16,
+	TextColor3 = Color3.fromRGB(245, 240, 255),
 	TextXAlignment = Enum.TextXAlignment.Left,
 }, header)
 
 uiCreate("TextLabel", {
-	Size = UDim2.new(0, 390, 0, 17),
-	Position = UDim2.fromOffset(16, 31),
+	Size = UDim2.fromOffset(250, 15),
+	Position = UDim2.fromOffset(14, 25),
 	BackgroundTransparency = 1,
-	Text = "any  ·  Any Hangout  ·  discord.gg/9D6wqueUt2",
+	Text = "Purple Neon Edition · Dynamic Island HUD",
 	Font = Enum.Font.Gotham,
-	TextSize = 11,
-	TextColor3 = Color3.fromRGB(129, 137, 154),
+	TextSize = 10,
+	TextColor3 = Color3.fromRGB(165, 145, 198),
 	TextXAlignment = Enum.TextXAlignment.Left,
 }, header)
 
 local statusPill = uiCreate("TextLabel", {
-	Size = UDim2.fromOffset(160, 30),
-	Position = UDim2.new(1, -214, 0.5, -15),
-	BackgroundColor3 = Color3.fromRGB(28, 80, 66),
+	Size = UDim2.fromOffset(106, 26),
+	Position = UDim2.new(1, -148, 0.5, -13),
+	BackgroundColor3 = Color3.fromRGB(88, 28, 135),
 	BorderSizePixel = 0,
 	Text = "FARM ACTIVE",
 	Font = Enum.Font.GothamBold,
-	TextSize = 11,
-	TextColor3 = Color3.fromRGB(185, 255, 225),
+	TextSize = 10,
+	TextColor3 = Color3.fromRGB(240, 215, 255),
 }, header)
-uiCorner(statusPill, 9)
+uiCorner(statusPill, 8)
+uiStroke(statusPill, 0.35, Color3.fromRGB(192, 132, 252))
+
+local collapseButton = uiCreate("TextButton", {
+	Size = UDim2.fromOffset(28, 26),
+	Position = UDim2.new(1, -36, 0.5, -13),
+	BackgroundColor3 = Color3.fromRGB(30, 22, 46),
+	BorderSizePixel = 0,
+	Text = "—",
+	Font = Enum.Font.GothamBold,
+	TextSize = 13,
+	TextColor3 = Color3.fromRGB(225, 210, 250),
+	AutoButtonColor = false,
+}, header)
+uiCorner(collapseButton, 8)
+uiStroke(collapseButton, 0.5, Color3.fromRGB(147, 51, 234))
 
 local statsHolder = uiCreate("Frame", {
-	Size = UDim2.new(1, -28, 0, 70),
-	Position = UDim2.fromOffset(14, 78),
+	Size = UDim2.new(1, -24, 0, 58),
+	Position = UDim2.fromOffset(12, 66),
 	BackgroundTransparency = 1,
 }, frame2)
 uiCreate("UIListLayout", {
 	FillDirection = Enum.FillDirection.Horizontal,
-	Padding = UDim.new(0, 8),
+	Padding = UDim.new(0, 6),
 	SortOrder = Enum.SortOrder.LayoutOrder,
 }, statsHolder)
 
@@ -357,75 +492,60 @@ local statDefinitions = {
 
 for index, definition in ipairs(statDefinitions) do
 	local card = uiCreate("Frame", {
-		Size = UDim2.new(0.2, -7, 1, 0),
-		BackgroundColor3 = Color3.fromRGB(18, 21, 28),
+		Size = UDim2.new(0.2, -5, 1, 0),
+		BackgroundColor3 = Color3.fromRGB(19, 15, 30),
 		BorderSizePixel = 0,
 		LayoutOrder = index,
 	}, statsHolder)
-	uiCorner(card, 11)
-	uiStroke(card, 0.55)
+	uiCorner(card, 10)
+	uiStroke(card, 0.6, Color3.fromRGB(139, 92, 246))
+
 	uiCreate("TextLabel", {
-		Size = UDim2.new(1, -18, 0, 16),
-		Position = UDim2.fromOffset(10, 9),
+		Size = UDim2.new(1, -12, 0, 14),
+		Position = UDim2.fromOffset(8, 6),
 		BackgroundTransparency = 1,
 		Text = definition.label,
-		Font = Enum.Font.GothamMedium,
+		Font = Enum.Font.GothamBold,
 		TextSize = 9,
-		TextColor3 = Color3.fromRGB(115, 123, 140),
+		TextColor3 = Color3.fromRGB(168, 130, 225),
 		TextXAlignment = Enum.TextXAlignment.Left,
 	}, card)
+
 	local value = uiCreate("TextLabel", {
-		Size = UDim2.new(1, -18, 0, 30),
-		Position = UDim2.fromOffset(10, 27),
+		Size = UDim2.new(1, -12, 0, 26),
+		Position = UDim2.fromOffset(8, 23),
 		BackgroundTransparency = 1,
 		Text = definition.value,
 		Font = Enum.Font.GothamBold,
-		TextSize = definition.id == "timer" and 18 or 21,
-		TextColor3 = Color3.fromRGB(239, 242, 248),
+		TextSize = definition.id == "timer" and 13 or 16,
+		TextColor3 = Color3.fromRGB(246, 242, 255),
 		TextXAlignment = Enum.TextXAlignment.Left,
 	}, card)
 	tbl3[definition.id] = value
 end
 
 local controls = uiCreate("Frame", {
-	Size = UDim2.new(1, -28, 0, 104),
-	Position = UDim2.fromOffset(14, 158),
-	BackgroundColor3 = Color3.fromRGB(18, 21, 28),
+	Size = UDim2.new(1, -24, 0, 48),
+	Position = UDim2.fromOffset(12, 132),
+	BackgroundColor3 = Color3.fromRGB(19, 15, 30),
 	BorderSizePixel = 0,
 }, frame2)
-uiCorner(controls, 12)
-uiStroke(controls, 0.55)
-
-local function controlLabel(text, x, width)
-	return uiCreate("TextLabel", {
-		Size = UDim2.fromOffset(width, 15),
-		Position = UDim2.fromOffset(x, 10),
-		BackgroundTransparency = 1,
-		Text = text,
-		Font = Enum.Font.GothamMedium,
-		TextSize = 9,
-		TextColor3 = Color3.fromRGB(114, 123, 140),
-		TextXAlignment = Enum.TextXAlignment.Left,
-	}, controls)
-end
-
-controlLabel("REGION", 12, 210)
-controlLabel("SERVER HOP", 245, 210)
-controlLabel("ANTI AFK", 478, 190)
+uiCorner(controls, 10)
+uiStroke(controls, 0.6, Color3.fromRGB(139, 92, 246))
 
 local regionButton = uiCreate("TextButton", {
-	Size = UDim2.fromOffset(220, 32),
-	Position = UDim2.fromOffset(12, 30),
-	BackgroundColor3 = Color3.fromRGB(24, 28, 36),
+	Size = UDim2.new(0.48, -10, 0, 32),
+	Position = UDim2.fromOffset(8, 8),
+	BackgroundColor3 = Color3.fromRGB(27, 21, 42),
 	BorderSizePixel = 0,
-	Text = tostring(v.country or "Singapore") .. "   ▾",
+	Text = "Region: " .. tostring(v.country or "Singapore") .. "  ▾",
 	Font = Enum.Font.GothamMedium,
 	TextSize = 11,
-	TextColor3 = Color3.fromRGB(226, 231, 240),
+	TextColor3 = Color3.fromRGB(235, 225, 252),
 	AutoButtonColor = false,
 }, controls)
-uiCorner(regionButton, 9)
-uiStroke(regionButton, 0.6)
+uiCorner(regionButton, 8)
+uiStroke(regionButton, 0.5, Color3.fromRGB(147, 51, 234))
 
 local doServerHop = getgenv().DoServerHop
 if doServerHop == nil then
@@ -434,73 +554,53 @@ end
 getgenv().DoServerHop = doServerHop
 
 local hopToggle = uiCreate("TextButton", {
-	Size = UDim2.fromOffset(220, 32),
-	Position = UDim2.fromOffset(245, 30),
-	BackgroundColor3 = Color3.fromRGB(28, 80, 66),
+	Size = UDim2.new(0.52, -10, 0, 32),
+	Position = UDim2.new(0.48, 2, 0, 8),
+	BackgroundColor3 = Color3.fromRGB(88, 28, 135),
 	BorderSizePixel = 0,
-	Text = "ENABLED",
+	Text = "Auto Server Hop: ON",
 	Font = Enum.Font.GothamBold,
 	TextSize = 11,
-	TextColor3 = Color3.fromRGB(190, 255, 225),
+	TextColor3 = Color3.fromRGB(240, 215, 255),
 	AutoButtonColor = false,
 }, controls)
-uiCorner(hopToggle, 9)
+uiCorner(hopToggle, 8)
+uiStroke(hopToggle, 0.45, Color3.fromRGB(192, 132, 252))
 
-local antiAfkStatus = uiCreate("TextLabel", {
-	Size = UDim2.fromOffset(208, 32),
-	Position = UDim2.fromOffset(478, 30),
-	BackgroundColor3 = Color3.fromRGB(24, 28, 36),
-	BorderSizePixel = 0,
-	Text = "ACTIVE",
-	Font = Enum.Font.GothamBold,
-	TextSize = 10,
-	TextColor3 = Color3.fromRGB(140, 215, 190),
-}, controls)
-uiCorner(antiAfkStatus, 9)
-uiStroke(antiAfkStatus, 0.6)
-
-uiCreate("TextLabel", {
-	Size = UDim2.new(1, -24, 0, 20),
-	Position = UDim2.fromOffset(12, 72),
-	BackgroundTransparency = 1,
-	Text = "Legacy combat core · Super Fix Lag · Anti AFK",
-	Font = Enum.Font.Gotham,
-	TextSize = 10,
-	TextColor3 = Color3.fromRGB(126, 136, 154),
-	TextXAlignment = Enum.TextXAlignment.Left,
-}, controls)
-
-local dropdown = uiCreate("Frame", {
-	Size = UDim2.fromOffset(220, 0),
-	Position = UDim2.fromOffset(12, 64),
-	BackgroundColor3 = Color3.fromRGB(20, 24, 31),
+local dropdown = uiCreate("ScrollingFrame", {
+	Size = UDim2.fromOffset(214, 0),
+	Position = UDim2.fromOffset(20, 182),
+	BackgroundColor3 = Color3.fromRGB(22, 17, 35),
 	BorderSizePixel = 0,
 	ClipsDescendants = true,
 	Visible = false,
-	ZIndex = 20,
-}, controls)
+	ScrollBarThickness = 3,
+	ScrollBarImageColor3 = Color3.fromRGB(168, 85, 247),
+	CanvasSize = UDim2.fromOffset(0, #tbl * 26),
+	ZIndex = 30,
+}, frame2)
 uiCorner(dropdown, 9)
-uiStroke(dropdown, 0.35)
+uiStroke(dropdown, 0.3, Color3.fromRGB(168, 85, 247))
 uiCreate("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder }, dropdown)
 
 for index, region in ipairs(tbl) do
 	local button = uiCreate("TextButton", {
 		Size = UDim2.new(1, 0, 0, 26),
-		BackgroundColor3 = Color3.fromRGB(20, 24, 31),
+		BackgroundColor3 = Color3.fromRGB(22, 17, 35),
 		BorderSizePixel = 0,
 		Text = "  " .. region,
 		Font = Enum.Font.Gotham,
-		TextSize = 10,
-		TextColor3 = Color3.fromRGB(215, 221, 231),
+		TextSize = 11,
+		TextColor3 = Color3.fromRGB(230, 220, 248),
 		TextXAlignment = Enum.TextXAlignment.Left,
 		LayoutOrder = index,
-		ZIndex = 21,
+		ZIndex = 31,
 	}, dropdown)
 	button.MouseButton1Click:Connect(function()
 		v.country = region
-		regionButton.Text = region .. "   ▾"
+		regionButton.Text = "Region: " .. region .. "  ▾"
 		dropdown.Visible = false
-		dropdown.Size = UDim2.fromOffset(220, 0)
+		dropdown.Size = UDim2.fromOffset(214, 0)
 		fn()
 	end)
 end
@@ -508,18 +608,18 @@ end
 regionButton.MouseButton1Click:Connect(function()
 	local open = not dropdown.Visible
 	dropdown.Visible = open
-	dropdown.Size = open and UDim2.fromOffset(220, math.min(#tbl, 6) * 26) or UDim2.fromOffset(220, 0)
+	dropdown.Size = open and UDim2.fromOffset(214, 130) or UDim2.fromOffset(214, 0)
 end)
 
 local function refreshHopToggle()
 	if doServerHop then
-		hopToggle.Text = "ENABLED"
-		hopToggle.BackgroundColor3 = Color3.fromRGB(28, 80, 66)
-		hopToggle.TextColor3 = Color3.fromRGB(190, 255, 225)
+		hopToggle.Text = "Auto Server Hop: ON"
+		hopToggle.BackgroundColor3 = Color3.fromRGB(88, 28, 135)
+		hopToggle.TextColor3 = Color3.fromRGB(240, 215, 255)
 	else
-		hopToggle.Text = "DISABLED"
-		hopToggle.BackgroundColor3 = Color3.fromRGB(65, 39, 45)
-		hopToggle.TextColor3 = Color3.fromRGB(255, 192, 201)
+		hopToggle.Text = "Auto Server Hop: OFF"
+		hopToggle.BackgroundColor3 = Color3.fromRGB(45, 25, 52)
+		hopToggle.TextColor3 = Color3.fromRGB(190, 160, 210)
 	end
 end
 refreshHopToggle()
@@ -530,44 +630,44 @@ hopToggle.MouseButton1Click:Connect(function()
 end)
 
 local webhookPanel = uiCreate("Frame", {
-	Size = UDim2.new(1, -28, 0, 48),
-	Position = UDim2.fromOffset(14, 272),
-	BackgroundColor3 = Color3.fromRGB(18, 21, 28),
+	Size = UDim2.new(1, -24, 0, 44),
+	Position = UDim2.fromOffset(12, 188),
+	BackgroundColor3 = Color3.fromRGB(19, 15, 30),
 	BorderSizePixel = 0,
 }, frame2)
-uiCorner(webhookPanel, 12)
-uiStroke(webhookPanel, 0.55)
+uiCorner(webhookPanel, 10)
+uiStroke(webhookPanel, 0.6, Color3.fromRGB(139, 92, 246))
 
 local webhookBox = uiCreate("TextBox", {
-	Size = UDim2.new(1, -132, 0, 30),
-	Position = UDim2.fromOffset(10, 9),
-	BackgroundColor3 = Color3.fromRGB(24, 28, 36),
+	Size = UDim2.new(1, -104, 0, 28),
+	Position = UDim2.fromOffset(8, 8),
+	BackgroundColor3 = Color3.fromRGB(27, 21, 42),
 	BorderSizePixel = 0,
 	Text = v.webhookUrl or "",
-	PlaceholderText = "Discord webhook URL",
-	PlaceholderColor3 = Color3.fromRGB(98, 106, 122),
+	PlaceholderText = "Discord Webhook URL (Auto 5m report)",
+	PlaceholderColor3 = Color3.fromRGB(120, 102, 150),
 	Font = Enum.Font.Gotham,
 	TextSize = 10,
-	TextColor3 = Color3.fromRGB(219, 225, 235),
+	TextColor3 = Color3.fromRGB(235, 225, 252),
 	ClearTextOnFocus = false,
 	TextXAlignment = Enum.TextXAlignment.Left,
 }, webhookPanel)
-uiCorner(webhookBox, 8)
-uiStroke(webhookBox, 0.65)
-uiCreate("UIPadding", { PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) }, webhookBox)
+uiCorner(webhookBox, 7)
+uiStroke(webhookBox, 0.6, Color3.fromRGB(147, 51, 234))
+uiCreate("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8) }, webhookBox)
 
 local textButton = uiCreate("TextButton", {
-	Size = UDim2.fromOffset(104, 30),
-	Position = UDim2.new(1, -114, 0, 9),
-	BackgroundColor3 = Color3.fromRGB(34, 41, 54),
+	Size = UDim2.fromOffset(84, 28),
+	Position = UDim2.new(1, -92, 0, 8),
+	BackgroundColor3 = Color3.fromRGB(109, 40, 217),
 	BorderSizePixel = 0,
 	Text = "TEST",
 	Font = Enum.Font.GothamBold,
 	TextSize = 10,
-	TextColor3 = Color3.fromRGB(216, 225, 239),
+	TextColor3 = Color3.fromRGB(245, 240, 255),
 	AutoButtonColor = false,
 }, webhookPanel)
-uiCorner(textButton, 8)
+uiCorner(textButton, 7)
 
 webhookBox.FocusLost:Connect(function()
 	v.webhookUrl = webhookBox.Text
@@ -575,65 +675,66 @@ webhookBox.FocusLost:Connect(function()
 end)
 
 local actions = uiCreate("Frame", {
-	Size = UDim2.new(1, -28, 0, 62),
-	Position = UDim2.fromOffset(14, 330),
+	Size = UDim2.new(1, -24, 0, 42),
+	Position = UDim2.fromOffset(12, 240),
 	BackgroundTransparency = 1,
 }, frame2)
 
 local farmButton = uiCreate("TextButton", {
-	Size = UDim2.new(0.46, -5, 0, 42),
+	Size = UDim2.new(0.44, -4, 1, 0),
 	Position = UDim2.fromOffset(0, 0),
-	BackgroundColor3 = Color3.fromRGB(125, 48, 59),
+	BackgroundColor3 = Color3.fromRGB(147, 51, 234),
 	BorderSizePixel = 0,
 	Text = "STOP FARM",
 	Font = Enum.Font.GothamBold,
 	TextSize = 11,
-	TextColor3 = Color3.fromRGB(255, 224, 228),
+	TextColor3 = Color3.fromRGB(250, 245, 255),
 	AutoButtonColor = false,
 }, actions)
-uiCorner(farmButton, 10)
+uiCorner(farmButton, 9)
 
 local textButton2 = uiCreate("TextButton", {
-	Size = UDim2.new(0.29, -5, 0, 42),
-	Position = UDim2.new(0.46, 5, 0, 0),
-	BackgroundColor3 = Color3.fromRGB(34, 41, 54),
+	Size = UDim2.new(0.30, -4, 1, 0),
+	Position = UDim2.new(0.44, 4, 0, 0),
+	BackgroundColor3 = Color3.fromRGB(29, 22, 46),
 	BorderSizePixel = 0,
 	Text = "HOP SERVER",
 	Font = Enum.Font.GothamBold,
 	TextSize = 11,
-	TextColor3 = Color3.fromRGB(219, 226, 238),
+	TextColor3 = Color3.fromRGB(235, 225, 252),
 	AutoButtonColor = false,
 }, actions)
-uiCorner(textButton2, 10)
-uiStroke(textButton2, 0.5)
+uiCorner(textButton2, 9)
+uiStroke(textButton2, 0.5, Color3.fromRGB(147, 51, 234))
 
 local renderButton = uiCreate("TextButton", {
-	Size = UDim2.new(0.25, -5, 0, 42),
-	Position = UDim2.new(0.75, 5, 0, 0),
-	BackgroundColor3 = Color3.fromRGB(34, 41, 54),
+	Size = UDim2.new(0.26, -4, 1, 0),
+	Position = UDim2.new(0.74, 4, 0, 0),
+	BackgroundColor3 = Color3.fromRGB(29, 22, 46),
 	BorderSizePixel = 0,
 	Text = "RENDER OFF",
 	Font = Enum.Font.GothamBold,
 	TextSize = 10,
-	TextColor3 = Color3.fromRGB(219, 226, 238),
+	TextColor3 = Color3.fromRGB(235, 225, 252),
 	AutoButtonColor = false,
 }, actions)
-uiCorner(renderButton, 10)
-uiStroke(renderButton, 0.5)
+uiCorner(renderButton, 9)
+uiStroke(renderButton, 0.5, Color3.fromRGB(147, 51, 234))
 
-local fn4
-fn4 = function(arg)
+local fn4 = function(arg)
 	flag3 = arg == true
 	if flag3 then
 		farmButton.Text = "STOP FARM"
-		farmButton.BackgroundColor3 = Color3.fromRGB(125, 48, 59)
+		farmButton.BackgroundColor3 = Color3.fromRGB(147, 51, 234)
 		statusPill.Text = "FARM ACTIVE"
-		statusPill.BackgroundColor3 = Color3.fromRGB(28, 80, 66)
+		statusPill.BackgroundColor3 = Color3.fromRGB(88, 28, 135)
+		islandDot.BackgroundColor3 = Color3.fromRGB(192, 132, 252)
 	else
 		farmButton.Text = "START FARM"
-		farmButton.BackgroundColor3 = Color3.fromRGB(33, 105, 76)
+		farmButton.BackgroundColor3 = Color3.fromRGB(59, 39, 94)
 		statusPill.Text = "FARM PAUSED"
-		statusPill.BackgroundColor3 = Color3.fromRGB(70, 63, 40)
+		statusPill.BackgroundColor3 = Color3.fromRGB(60, 42, 78)
+		islandDot.BackgroundColor3 = Color3.fromRGB(245, 158, 11)
 	end
 end
 fn4(flag3)
@@ -647,13 +748,16 @@ local function setRenderEnabled(value)
 	getgenv().renderEnabled = renderEnabled
 	renderButton.Text = renderEnabled and "RENDER ON" or "RENDER OFF"
 	if renderEnabled then
-		renderButton.BackgroundColor3 = Color3.fromRGB(34, 41, 54)
+		renderButton.BackgroundColor3 = Color3.fromRGB(29, 22, 46)
 	else
-		renderButton.BackgroundColor3 = Color3.fromRGB(125, 48, 59)
+		renderButton.BackgroundColor3 = Color3.fromRGB(109, 40, 217)
 	end
 	pcall(function()
 		RunService:Set3dRenderingEnabled(renderEnabled)
 	end)
+	if type(setfpscap) == "function" then
+		pcall(setfpscap, renderEnabled and 60 or 20)
+	end
 end
 renderButton.MouseButton1Click:Connect(function()
 	setRenderEnabled(not renderEnabled)
@@ -661,61 +765,63 @@ end)
 setRenderEnabled(renderEnabled)
 
 local collapsed = false
-local collapseButton = uiCreate("TextButton", {
-	Size = UDim2.fromOffset(30, 30),
-	Position = UDim2.new(1, -38, 0.5, -15),
-	BackgroundColor3 = Color3.fromRGB(30, 35, 45),
-	BorderSizePixel = 0,
-	Text = "—",
-	Font = Enum.Font.GothamBold,
-	TextSize = 15,
-	TextColor3 = Color3.fromRGB(220, 226, 238),
-	AutoButtonColor = false,
-}, header)
-uiCorner(collapseButton, 8)
-uiStroke(collapseButton, 0.55)
-
 local function setCollapsed(value)
 	collapsed = value == true
-	statsHolder.Visible = not collapsed
-	controls.Visible = not collapsed
-	webhookPanel.Visible = not collapsed
-	actions.Visible = not collapsed
 	dropdown.Visible = false
-	dropdown.Size = UDim2.fromOffset(220, 0)
-	frame2.Size = collapsed and UDim2.fromOffset(728, 80) or UDim2.fromOffset(728, 408)
-	shadow.Size = collapsed and UDim2.fromOffset(728, 80) or UDim2.fromOffset(728, 408)
-	collapseButton.Text = collapsed and "+" or "—"
+	dropdown.Size = UDim2.fromOffset(214, 0)
+	if collapsed then
+		frame2.Visible = false
+		islandHint.Text = "▾"
+	else
+		frame2.Visible = true
+		islandHint.Text = "▴"
+	end
 end
 collapseButton.MouseButton1Click:Connect(function()
-	setCollapsed(not collapsed)
+	setCollapsed(true)
 end)
 
-local UserInputService = game:GetService("UserInputService")
-local dragging = false
-local dragStart
-local startPosition
-local dragInput
-header.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		dragging = true
-		dragStart = input.Position
-		startPosition = frame2.Position
-		dragInput = input
-	end
-end)
-UserInputService.InputChanged:Connect(function(input)
-	if dragging and dragInput and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-		local delta = input.Position - dragStart
-		frame2.Position = UDim2.new(startPosition.X.Scale, startPosition.X.Offset + delta.X, startPosition.Y.Scale, startPosition.Y.Offset + delta.Y)
-		shadow.Position = UDim2.new(frame2.Position.X.Scale, frame2.Position.X.Offset + 6, frame2.Position.Y.Scale, frame2.Position.Y.Offset + 8)
-	end
-end)
-UserInputService.InputEnded:Connect(function(input)
-	if dragInput == input then
-		dragging = false
-		dragInput = nil
-	end
+local function bindDrag(handle, targetFrame, clickAction)
+	local dragging = false
+	local dragStart
+	local startPosition
+	local dragInput
+	local hasMoved = false
+
+	handle.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			hasMoved = false
+			dragStart = input.Position
+			startPosition = targetFrame.Position
+			dragInput = input
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and dragInput and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+			local delta = input.Position - dragStart
+			if delta.Magnitude > 5 then
+				hasMoved = true
+			end
+			targetFrame.Position = UDim2.new(startPosition.X.Scale, startPosition.X.Offset + delta.X, startPosition.Y.Scale, startPosition.Y.Offset + delta.Y)
+		end
+	end)
+
+	UserInputService.InputEnded:Connect(function(input)
+		if dragInput == input then
+			dragging = false
+			dragInput = nil
+			if not hasMoved and clickAction then
+				clickAction()
+			end
+		end
+	end)
+end
+
+bindDrag(header, frame2)
+bindDrag(islandBar, islandBar, function()
+	setCollapsed(not collapsed)
 end)
 
 local function fn5()
@@ -725,7 +831,6 @@ local function fn5()
 	for _, v2 in ipairs({ "CaptureManager", "CaptureOverlay", "PlayerList" }) do
 		pcall(function()
 			local v3 = CoreGui:FindFirstChild(v2)
-
 			if v3 then
 				v3:Destroy()
 			end
@@ -739,17 +844,14 @@ end
 
 task.spawn(function()
 	fn5()
-
 	while true do
 		pcall(function()
 			game:GetService("StarterGui"):SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false)
 			local playerList = game:GetService("CoreGui"):FindFirstChild("PlayerList")
-
 			if playerList then
 				playerList:Destroy()
 			end
 		end)
-
 		task.wait(2)
 	end
 end)
@@ -760,46 +862,29 @@ if not getgenv().TimeFarmed then
 	getgenv().TimeFarmed = 0
 end
 
-local savedCarriedKills
-savedCarriedKills = getgenv().SavedCarriedKills or 0
-local savedEmotes
-savedEmotes = getgenv().SavedEmotes or 0
-local savedSessionStart
-savedSessionStart = getgenv().SavedSessionStart or os.time()
-local n3
-n3 = 0
-local n4
-n4 = 0
-local n5
-n5 = 0
-local n6
-n6 = 0
-local n7
-n7 = 0
-local flag4
-flag4 = false
-local cFrame
-cFrame = nil
-local v2
-v2 = nil
-local flag5
-flag5 = false
-local flag6
-flag6 = false
-local flag7
-flag7 = false
-local flag8, n8, TeleportService, Players, VirtualInputManager, localPlayer, currentCamera, fn6, fn7
+local savedCarriedKills = getgenv().SavedCarriedKills or 0
+local savedEmotes = getgenv().SavedEmotes or 0
+local savedSessionStart = getgenv().SavedSessionStart or os.time()
+local n3 = 0
+local n4 = 0
+local n5 = 0
+local n6 = 0
+local n7 = 0
+local flag4 = false
+local cFrame = nil
+local v2 = nil
+local flag5 = false
+local flag6 = false
+local flag7 = false
+local flag8, n8, VirtualInputManager, currentCamera, fn6, fn7
+local ignoredTargets = {}
 
 do
 	local flag9 = false
 	flag8 = false
 	n8 = 0
-	TeleportService = game:GetService("TeleportService")
-	Players = game:GetService("Players")
-	local UserInputService = game:GetService("UserInputService")
 	local ReplicatedStorage = game:GetService("ReplicatedStorage")
 	VirtualInputManager = game:GetService("VirtualInputManager")
-	localPlayer = Players.LocalPlayer
 	currentCamera = workspace.CurrentCamera
 	local leaderstats
 
@@ -809,32 +894,41 @@ do
 		leaderstats = localPlayer.leaderstats
 	end
 
+	local httpRequest = request or http_request or (syn and syn.request) or (fluxus and fluxus.request)
+
 	fn6 = function()
+		if not httpRequest or not v.webhookUrl or v.webhookUrl == "" then
+			return false
+		end
 		local name = localPlayer and localPlayer.Name or "Unknown"
-		local v3 = n3
-		local v4 = savedEmotes
-		local v5 = n6
-		local v6 = n4
-		local text = tbl3.timer and tbl3.timer.Text
+		local text = tbl3.timer and tbl3.timer.Text or "00:00:00"
+		local playerCount = #Players:GetPlayers()
 
 		local tbl4 = {
+			username = "Any TSB Farm",
 			embeds = {
 				{
-					title = "Any TSB Farm",
-					color = 0,
-					description = string.format([[**User:** ||%s||
-**Kills farmed:** %s
-**Emotes unlocked:** %s
-**Total kills:** %s
-**Kill / hr:** %s
-**Time farmed:** %s]], name, tostring(v3), tostring(v4), tostring(v5), tostring(v6), text),
+					title = "ANY TSB FARM — REPORT",
+					color = 11041271,
+					fields = {
+						{ name = "User", value = "||" .. tostring(name) .. "||", inline = true },
+						{ name = "Status", value = flag3 and "ACTIVE" or "PAUSED", inline = true },
+						{ name = "Region / Players", value = string.format("%s (%d/16)", tostring(v.country), playerCount), inline = true },
+						{ name = "Kills Farmed", value = tostring(n3), inline = true },
+						{ name = "Kills / Hr", value = tostring(n4), inline = true },
+						{ name = "Total Kills", value = tostring(n6), inline = true },
+						{ name = "Emotes Unlocked", value = tostring(savedEmotes), inline = true },
+						{ name = "Time Farmed", value = tostring(text), inline = true },
+						{ name = "Ults Used", value = tostring(n8), inline = true },
+						{ name = "Server JobId", value = "`" .. tostring(game.JobId) .. "`", inline = false },
+					},
 					timestamp = DateTime.now():ToIsoDate(),
 				},
 			},
 		}
 
 		local ok, result = pcall(function()
-			return request({
+			return httpRequest({
 				Url = v.webhookUrl,
 				Method = "POST",
 				Headers = { ["Content-Type"] = "application/json" },
@@ -842,19 +936,23 @@ do
 			})
 		end)
 
-		if not ok then
-			warn("Webhook request failed: " .. tostring(result))
-		end
-
 		return ok, result
 	end
 
-	textButton.MouseButton1Click:Connect(fn6)
+	textButton.MouseButton1Click:Connect(function()
+		textButton.Text = "SENDING"
+		task.spawn(function()
+			local ok = fn6()
+			textButton.Text = ok and "SENT" or "ERR"
+			task.wait(1.5)
+			textButton.Text = "TEST"
+		end)
+	end)
+
 	workspace.FallenPartsDestroyHeight = (0/0)
 
 	workspace:GetPropertyChangedSignal("FallenPartsDestroyHeight"):Connect(function()
 		local fallenPartsDestroyHeight = workspace.FallenPartsDestroyHeight
-
 		if fallenPartsDestroyHeight == fallenPartsDestroyHeight then
 			workspace.FallenPartsDestroyHeight = (0/0)
 		end
@@ -866,7 +964,7 @@ do
 	part.Size = Vector3.new(2048, 10, 2048)
 	part.Transparency = 0.5
 	part.CanCollide = true
-	part.Name = game:GetService("HttpService"):GenerateGUID()
+	part.Name = HttpService:GenerateGUID()
 	local health = 100
 	local connection = nil
 	local connection2 = nil
@@ -894,7 +992,6 @@ do
 
 		connection2 = RunService.RenderStepped:Connect(function()
 			local humanoidRootPart2 = arg:FindFirstChild("HumanoidRootPart")
-
 			if humanoidRootPart2 then
 				health = humanoid.Health
 				part.CFrame = CFrame.new(humanoidRootPart2.Position.X, -10008, humanoidRootPart2.Position.Z)
@@ -903,7 +1000,6 @@ do
 
 		connection = humanoid.HealthChanged:Connect(function(health2)
 			local humanoidRootPart2 = arg:FindFirstChild("HumanoidRootPart")
-
 			if health2 <= 0 and humanoidRootPart2 and humanoidRootPart2.CFrame.Y <= 0 then
 				humanoid.Health = health
 			end
@@ -993,7 +1089,6 @@ do
 					v3:Stop()
 				end
 			end)
-
 			v3 = nil
 		end
 
@@ -1002,7 +1097,6 @@ do
 
 		if character then
 			local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
-
 			if humanoidRootPart and v5 then
 				pcall(function()
 					humanoidRootPart.CFrame = v5
@@ -1011,7 +1105,6 @@ do
 
 			v5 = nil
 			local humanoid2 = character:FindFirstChildOfClass("Humanoid")
-
 			if humanoid2 then
 				pcall(function()
 					workspace.CurrentCamera.CameraSubject = humanoid2
@@ -1045,7 +1138,6 @@ do
 					v3:Stop()
 				end
 			end)
-
 			v3 = nil
 		end
 
@@ -1058,15 +1150,12 @@ do
 		if not arg:IsA("BasePart") then
 			return
 		end
-
 		if arg.Name == "HumanoidRootPart" then
 			return
 		end
-
 		if arg.Transparency == 1 then
 			return
 		end
-
 		if arg.Name:lower():find("hitbox") then
 			return
 		end
@@ -1076,7 +1165,6 @@ do
 			if not flag11 then
 				return
 			end
-
 			if arg.LocalTransparencyModifier ~= 0.5 then
 				arg.LocalTransparencyModifier = 0.5
 			end
@@ -1123,6 +1211,19 @@ do
 		end
 	end
 
+	localPlayer.CharacterAdded:Connect(function(character)
+		task.wait(0.15)
+		if flag11 then
+			for _, v6 in pairs(tbl5) do
+				pcall(function()
+					v6:Disconnect()
+				end)
+			end
+			tbl5 = {}
+			fn13(character)
+		end
+	end)
+
 	RunService.Heartbeat:Connect(function()
 		if not flag3 then
 			return
@@ -1153,7 +1254,6 @@ do
 			if flag11 then
 				task.spawn(fn11)
 			end
-
 			flag10 = false
 			return
 		end
@@ -1172,7 +1272,6 @@ do
 
 		if cFrame3 then
 			local flag14
-
 			if currentCamera2 then
 				flag14 = not (flag11 and not flag12)
 			else
@@ -1202,13 +1301,10 @@ do
 						if v3.IsPlaying then
 							v3:Stop()
 						end
-
 						v3:Destroy()
 					end)
-
 					v3 = nil
 				end
-
 				v4 = humanoid2
 			end
 
@@ -1244,7 +1340,6 @@ do
 				humanoidRootPart.CFrame = cFrame
 			else
 				local flag14 = currentCamera2 and UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter and not flag12
-
 				if flag14 then
 					flag14 = not (flag11 and not flag12)
 				end
@@ -1252,7 +1347,6 @@ do
 				if flag14 then
 					local lookVector = currentCamera2.CFrame.LookVector
 					local vector = Vector3.new(lookVector.X, 0, lookVector.Z)
-
 					if vector.Magnitude > 0.001 then
 						humanoidRootPart.CFrame = CFrame.new(cFrame2.Position, cFrame2.Position + vector)
 					else
@@ -1270,121 +1364,8 @@ do
 
 	fn14()
 
-	task.spawn(function()
-		local function fn15(arg)
-			while true do
-				task.wait()
-				if not (localPlayer.Character == arg and arg:FindFirstChild("HumanoidRootPart") and arg:FindFirstChildOfClass("Humanoid")) then
-					continue
-				end
-				break
-			end
-
-			if localPlayer.Character ~= arg then
-				return
-			end
-			local humanoidRootPart = arg:FindFirstChild("HumanoidRootPart")
-
-			task.spawn(function()
-				while task.wait() and (not localPlayer.Character or localPlayer.Character == arg) do
-					if getgenv().desync and not arg:FindFirstChild("AbsoluteImmortal") then
-						local tbl6 = {}
-
-						local ok, result = pcall(function()
-							return ReplicatedStorage.Resources.NinjaUlt.Afterimage_Despawn:Clone()
-						end)
-
-						local ok2, result2 = pcall(function()
-							return ReplicatedStorage.Resources.VanishingKick.tpthing:Clone()
-						end)
-
-						if ok and result then
-							result.Parent = humanoidRootPart
-							tbl6[1] = result
-
-							for _, child in pairs(result:GetChildren()) do
-								if child:IsA("ParticleEmitter") then
-									child.Enabled = true
-									child.Rate = 100
-								end
-							end
-						end
-
-						if ok2 and result2 then
-							result2.Parent = humanoidRootPart
-							tbl6[2] = result2
-							result2.Enabled = true
-							result2.Rate = 100
-						end
-
-						while true do
-							if tbl6[1] and tbl6[1].Parent then
-								tbl6[1].CFrame = humanoidRootPart.CFrame
-							end
-
-							RunService.RenderStepped:Wait()
-							if not (not getgenv().desync or arg:FindFirstChild("AbsoluteImmortal")) then
-								continue
-							end
-							break
-						end
-
-						for _, v6 in pairs(tbl6) do
-							pcall(function()
-								v6:Destroy()
-							end)
-						end
-					end
-				end
-			end)
-
-			task.spawn(function()
-				for _, descendant in pairs(arg:GetDescendants()) do
-					if descendant:IsA("BasePart") and descendant ~= humanoidRootPart and descendant.Transparency ~= 1 and not descendant.Name:lower():find("hitbox") then
-						task.spawn(function()
-							while task.wait() and (not localPlayer.Character or localPlayer.Character == arg) do
-								if descendant and (flag11 or getgenv().desync and not arg:FindFirstChild("AbsoluteImmortal")) then
-									descendant.Transparency = 0.5
-
-									while true do
-										RunService.RenderStepped:Wait()
-										local flag12 = not flag11
-										local absoluteImmortal
-
-										if flag12 then
-											absoluteImmortal = not getgenv().desync or arg:FindFirstChild("AbsoluteImmortal")
-										else
-											absoluteImmortal = flag12
-										end
-
-										absoluteImmortal = absoluteImmortal or localPlayer.Character and localPlayer.Character ~= arg
-										if not absoluteImmortal then
-											continue
-										end
-										break
-									end
-
-									descendant.Transparency = 0
-								end
-							end
-						end)
-					end
-				end
-			end)
-		end
-
-		if localPlayer.Character then
-			task.spawn(fn15, localPlayer.Character)
-		end
-
-		localPlayer.CharacterAdded:Connect(function(character)
-			task.spawn(fn15, character)
-		end)
-	end)
-
 	local Lighting = game:GetService("Lighting")
-	local Workspace_ = game:GetService("Workspace")
-	local terrain = Workspace:FindFirstChildOfClass("Terrain")
+	local terrain = workspace:FindFirstChildOfClass("Terrain")
 
 	local function fn15(arg, arg2)
 		pcall(function()
@@ -1394,41 +1375,7 @@ do
 
 	local tbl6 = {
 		function()
-			local color = Color3.fromRGB(0, 85, 190)
-
-			local function fn16(arg)
-				if arg:IsA("Trail") then
-					arg.Color = ColorSequence.new(color)
-					arg.Texture = ""
-					arg.LightEmission = 0.8
-				elseif arg:IsA("ParticleEmitter") then
-					arg.Color = ColorSequence.new(color)
-					arg.LightEmission = 0.75
-				end
-			end
-
-			local function fn17(arg)
-				for _, descendant in ipairs(arg:GetDescendants()) do
-					if descendant:IsA("Trail") or descendant:IsA("ParticleEmitter") then
-						fn16(descendant)
-					end
-				end
-
-				fn15(arg.DescendantAdded, function(arg2)
-					if arg2:IsA("Trail") or arg2:IsA("ParticleEmitter") then
-						fn16(arg2)
-					end
-				end)
-			end
-
-			if localPlayer.Character then
-				fn17(localPlayer.Character)
-			end
-
-			fn15(localPlayer.CharacterAdded, fn17)
-		end,
-		function()
-			local tbl6 = {
+			local tbl7 = {
 				Bk = 92959017845968,
 				Ft = 129304841254693,
 				Lf = 129249062260004,
@@ -1444,11 +1391,9 @@ do
 			end
 
 			local sky = Instance.new("Sky")
-
-			for k, v6 in pairs(tbl6) do
+			for k, v6 in pairs(tbl7) do
 				sky["Skybox" .. k] = "rbxassetid://" .. v6
 			end
-
 			sky.Parent = Lighting
 		end,
 		function()
@@ -1456,9 +1401,8 @@ do
 			Lighting.GlobalShadows = false
 			Lighting.Brightness = 0.8
 			Lighting.ExposureCompensation = -0.2
-			local v6 = Lighting
 			Lighting.FogStart = 9e9
-			v6.FogEnd = 9e9
+			Lighting.FogEnd = 9e9
 
 			for _, child in ipairs(Lighting:GetChildren()) do
 				if child:IsA("PostEffect") or child:IsA("SunRaysEffect") then
@@ -1467,29 +1411,14 @@ do
 			end
 		end,
 		function()
-			fn15(Workspace_.DescendantAdded, function(arg)
-				if arg:IsA("Smoke") then
-					arg:Destroy()
-				elseif arg:IsA("ParticleEmitter") then
-					local model2 = arg:FindFirstAncestorOfClass("Model")
-
-					if not (model2 and model2:FindFirstChild("Class") and model2.Class.Value == "Hero Hunter") then
-						arg:Destroy()
-					end
-				end
-			end)
-		end,
-		function()
 			if not terrain then
 				return
 			end
-
 			for _, child in ipairs(terrain:GetChildren()) do
 				if child:IsA("Clouds") then
 					child.Enabled = false
 				end
 			end
-
 			fn15(terrain.ChildAdded, function(arg)
 				if arg:IsA("Clouds") then
 					arg.Enabled = false
@@ -1499,7 +1428,6 @@ do
 		function()
 			local function fn16()
 				local sky = Lighting:FindFirstChildOfClass("Sky")
-
 				if sky then
 					sky.SunAngularSize = 0
 					sky.SunTextureId = ""
@@ -1510,7 +1438,6 @@ do
 
 			fn16()
 			local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere")
-
 			if atmosphere then
 				atmosphere.Density = 0
 				atmosphere.Haze = 0
@@ -1531,18 +1458,13 @@ do
 	}
 
 	task.spawn(function()
-		local tbl7 = { 1, 2, 3, 4, 5, 6 }
-
-		while #tbl7 > 0 do
-			local n9 = math.random(#tbl7)
-			pcall(tbl6[tbl7[n9]])
-			table.remove(tbl7, n9)
+		for _, fnItem in ipairs(tbl6) do
+			pcall(fnItem)
 		end
 	end)
 
 	pcall(function()
-		local level01 = Enum.QualityLevel.Level01
-		settings().Rendering.QualityLevel = level01
+		settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
 	end)
 
 	local flag12 = false
@@ -1552,12 +1474,10 @@ do
 			if arg:IsA("Player") then
 				return arg.Character
 			end
-
 			if arg:IsA("Model") then
 				return arg
 			end
 		end
-
 		return nil
 	end
 
@@ -1572,11 +1492,9 @@ do
 	local function fn19()
 		local players = Players:GetPlayers()
 		local v6 = table.find(players, localPlayer)
-
 		if v6 then
 			table.remove(players, v6)
 		end
-
 		return players
 	end
 
@@ -1584,47 +1502,37 @@ do
 		if not arg then
 			return false
 		end
-
 		for _, v6 in pairs(arg:GetPlayingAnimationTracks()) do
 			if v6.Animation.AnimationId:match(arg2) then
 				return true
 			end
 		end
-
 		return false
 	end
 
 	fn7 = function()
 		local huge = math.huge
 		local v6 = nil
+		local nowTick = tick()
 
 		for _, player in ipairs(Players:GetPlayers()) do
-			if player ~= localPlayer then
-				if player ~= v2 then
+			if player ~= localPlayer and player ~= v2 then
+				if not (ignoredTargets[player] and nowTick < ignoredTargets[player]) then
 					local character = player.Character
-
-					if character then
-						if character:FindFirstChild("HumanoidRootPart") then
-							local humanoid2 = character:FindFirstChildOfClass("Humanoid")
-
-							if humanoid2 then
-								if humanoid2.Health then
-									local torso = character:FindFirstChild("Torso")
-
-									if not (not torso or torso.Transparency == 1) then
-										if not fn20(humanoid2, "15128849047") then
-											if not character:FindFirstChildWhichIsA("ForceField") then
-												if not (character:GetAttribute("Ulted") and (character:GetAttribute("Character") == "Batter" or character:GetAttribute("Character") == "Bald") or character:FindFirstChild("Counter")) then
-													local position = character.HumanoidRootPart.Position
-
-													if position.X >= -500 and position.X <= 800 and position.Z >= -600 and position.Z <= 700 then
-														local health2 = humanoid2.Health
-
-														if health2 > 0 and health2 < huge then
-															huge = health2
-															v6 = player
-														end
-													end
+					if character and character:FindFirstChild("HumanoidRootPart") then
+						local humanoid2 = character:FindFirstChildOfClass("Humanoid")
+						if humanoid2 and humanoid2.Health then
+							local torso = character:FindFirstChild("Torso")
+							if torso and torso.Transparency ~= 1 then
+								if not fn20(humanoid2, "15128849047") then
+									if not character:FindFirstChildWhichIsA("ForceField") then
+										if not (character:GetAttribute("Ulted") and (character:GetAttribute("Character") == "Batter" or character:GetAttribute("Character") == "Bald") or character:FindFirstChild("Counter")) then
+											local position = character.HumanoidRootPart.Position
+											if position.X >= -500 and position.X <= 800 and position.Z >= -600 and position.Z <= 700 then
+												local health2 = humanoid2.Health
+												if health2 > 0 and health2 < huge then
+													huge = health2
+													v6 = player
 												end
 											end
 										end
@@ -1649,10 +1557,10 @@ do
 		fn21BindToken += 1
 		local bindToken = fn21BindToken
 
-		for _, connection in ipairs({ fn21RagdollConnection, fn21CooldownConnection, fn21AnimationConnection }) do
-			if connection then
+		for _, connection3 in ipairs({ fn21RagdollConnection, fn21CooldownConnection, fn21AnimationConnection }) do
+			if connection3 then
 				pcall(function()
-					connection:Disconnect()
+					connection3:Disconnect()
 				end)
 			end
 		end
@@ -1763,7 +1671,6 @@ do
 						return
 					end
 					local v7 = fn17(fn16(localPlayer))
-
 					if v7 then
 						v7.AssemblyLinearVelocity = Vector3.new()
 						v7.AssemblyAngularVelocity = Vector3.new()
@@ -1818,7 +1725,6 @@ do
 					end)
 
 					local humanoid3 = v6.Parent:FindFirstChildOfClass("Humanoid")
-
 					if humanoid3 then
 						pcall(function()
 							humanoid3.AutoRotate = true
@@ -1984,7 +1890,6 @@ do
 								return v9
 							end
 						end
-
 						return nil
 					end
 
@@ -2036,16 +1941,11 @@ do
 					local tbl8 = {}
 					local v10 = nil
 					local now2 = tick()
-					local v11 = fn16(localPlayer)
-
-					if v11 and fn17(v11) then
-					end
 
 					local function fn29(arg3)
 						if not arg3 then
 							return nil
 						end
-
 						if arg3:IsA("Player") then
 							return fn16(arg3)
 						end
@@ -2064,27 +1964,21 @@ do
 						if not arg3 then
 							return false
 						end
-
 						if arg3:FindFirstChild("ForceField") then
 							return true
 						end
-
 						if arg3:FindFirstChild("AbsoluteImmortal") then
 							return true
 						end
-
 						if arg3:FindFirstChild("BeingGrabbed") then
 							return true
 						end
-
 						if arg3:FindFirstChild("HunterCounter") then
 							return true
 						end
-
 						if arg3:FindFirstChild("AtomicCounter") then
 							return true
 						end
-
 						if arg3:FindFirstChild("forcefield") then
 							return true
 						end
@@ -2098,24 +1992,19 @@ do
 						if not v12 or not v13 or not v14 then
 							return true
 						end
-
 						if v13.Health <= 0 then
 							return true
 						end
-
 						if arg3:IsA("Player") then
 							if fn32(v12) then
 								return true
 							end
-
 							if v12:FindFirstChild("Counter") then
 								return true
 							end
-
 							if fn20(v13, "15128849047") then
 								return true
 							end
-
 							if v12:GetAttribute("Ulted") and v12:GetAttribute("Character") == "Batter" then
 								return true
 							end
@@ -2131,13 +2020,11 @@ do
 					local function fn34(arg3)
 						local v12 = fn30(arg3)
 						local v13
-
 						if v12 then
 							v13 = fn20(v12, "18896222853") or fn20(v12, "137434257516014")
 						else
 							v13 = v12
 						end
-
 						return v13
 					end
 
@@ -2150,11 +2037,9 @@ do
 						if not v12 or not v13 then
 							return false
 						end
-
 						if v13.Health <= 0 then
 							return false
 						end
-
 						if fn20(v13, "15128849047") then
 							return false
 						end
@@ -2162,7 +2047,8 @@ do
 					end
 
 					local function fn36()
-						local weakestDummy = workspace.Live:FindFirstChild("Weakest Dummy")
+						local liveFolder = workspace:FindFirstChild("Live")
+						local weakestDummy = liveFolder and liveFolder:FindFirstChild("Weakest Dummy")
 						if not weakestDummy then
 							return nil
 						end
@@ -2180,7 +2066,6 @@ do
 						for _, v12 in pairs(fn19()) do
 							if not (v12 == arg3 or tbl8[v12]) then
 								local v13 = fn31(v12)
-
 								if not fn33(v12) and not fn34(v12) and v13 then
 									if fn22(v12) then
 										table.insert(tbl9, v12)
@@ -2194,7 +2079,6 @@ do
 						if #tbl9 > 0 then
 							return tbl9[math.random(1, #tbl9)]
 						end
-
 						if #tbl10 > 0 then
 							return tbl10[math.random(1, #tbl10)]
 						end
@@ -2208,7 +2092,6 @@ do
 					local function fn38()
 						local v12 = fn16(localPlayer)
 						local v13 = v12 and fn18(v12)
-
 						if v13 then
 							pcall(function()
 								v13.AutoRotate = true
@@ -2221,12 +2104,10 @@ do
 							if tbl8[v12] then
 								continue
 							end
-
 							if fn35(v12) then
 								return true
 							end
 						end
-
 						return false
 					end
 
@@ -2242,26 +2123,6 @@ do
 						flag15 = true
 						fn24()
 						fn38()
-
-						if _ffWatchConn then
-							pcall(function()
-								_ffWatchConn:Disconnect()
-							end)
-						end
-
-						if _dummyRespawnConn then
-							pcall(function()
-								_dummyRespawnConn:Disconnect()
-							end)
-						end
-
-						if _currentTargetAnimConn then
-							pcall(function()
-								_currentTargetAnimConn:Disconnect()
-							end)
-
-							_currentTargetAnimConn = nil
-						end
 
 						if specialLiveConnection then
 							pcall(function()
@@ -2295,14 +2156,12 @@ do
 							end)
 							specialLiveConnection = nil
 						end
-
 						if specialRenderConnection then
 							pcall(function()
 								specialRenderConnection:Disconnect()
 							end)
 							specialRenderConnection = nil
 						end
-
 						if connection5 then
 							pcall(function()
 								connection5:Disconnect()
@@ -2318,7 +2177,6 @@ do
 							pcall(function()
 								connection5:Disconnect()
 							end)
-
 							connection5 = nil
 						end
 
@@ -2337,10 +2195,8 @@ do
 
 								if v14 then
 									local animator = v14:FindFirstChildOfClass("Animator")
-
 									connection5 = (animator and animator.AnimationPlayed or v14.AnimationPlayed):Connect(function(arg4)
 										local animationId2 = arg4.Animation.AnimationId
-
 										if animationId2:match("18896222853") or animationId2:match("137434257516014") then
 											if not flag14 then
 												return
@@ -2355,18 +2211,15 @@ do
 
 											if v16 then
 												fn41(v16)
-
 												if fn37(v16) == nil and not fn39() then
 													task.wait(0.1)
 													tbl8[v16] = true
-													_everybodyDone = true
 													fn40()
 												end
 											elseif fn39() then
 												fn24()
 												v10 = nil
 											else
-												_everybodyDone = true
 												fn40()
 											end
 										end
@@ -2376,21 +2229,22 @@ do
 						end
 					end
 
-					specialLiveConnection = workspace.Live.ChildAdded:Connect(function(child)
-						if child.Name == "Weakest Dummy" then
-							tbl8[child] = nil
-						end
-					end)
+					local liveFolder = workspace:FindFirstChild("Live")
+					if liveFolder then
+						specialLiveConnection = liveFolder.ChildAdded:Connect(function(child)
+							if child.Name == "Weakest Dummy" then
+								tbl8[child] = nil
+							end
+						end)
+					end
 
 					specialRenderConnection = RunService.RenderStepped:Connect(function()
 						for _, v12 in pairs(fn19()) do
 							if tbl8[v12] then
 								local v13 = fn16(v12)
 								local v14 = v13 and fn18(v13)
-
 								if v13 and v14 and v14.Health > 0 and not fn32(v13) then
 									tbl8[v12] = nil
-
 									if not v10 then
 										fn41(v12)
 									end
@@ -2403,7 +2257,6 @@ do
 
 					if v12 then
 						fn41(v12)
-
 						if fn37(v12) == nil then
 							task.wait(0.1)
 							tbl8[v12] = true
@@ -2428,11 +2281,9 @@ do
 									if not fn35(v10) then
 										tbl8[v10] = true
 									end
-
 									flag16 = true
 								else
 									flag16 = false
-
 									if now3 - now2 >= 0.8 then
 										tbl8[v10] = true
 										flag16 = true
@@ -2441,7 +2292,6 @@ do
 
 								if flag16 then
 									local v13 = fn37(v10)
-
 									if not v13 then
 										if fn39() then
 											fn24()
@@ -2453,7 +2303,6 @@ do
 										end
 									else
 										fn41(v13)
-
 										if fn37(v13) == nil and not fn39() then
 											task.wait(0.1)
 											tbl8[v13] = true
@@ -2468,7 +2317,6 @@ do
 								end
 							end
 						end
-
 						break
 					end
 
@@ -2496,11 +2344,12 @@ do
 				attribute = attribute2
 			end
 
-			n4 = math.floor(n3 / math.max(os.time() - savedSessionStart, 1) / 3600)
+			n4 = math.floor((n3 / math.max(os.time() - savedSessionStart, 1)) * 3600)
 			tbl3.kills.Text = tostring(n3)
 			tbl3.kph.Text = tostring(n4)
 			tbl3.emotes.Text = tostring(savedEmotes)
 			tbl3.total.Text = tostring(n6)
+			islandText.Text = string.format("%s  ·  %d KILLS  ·  %d/HR", tbl3.timer.Text, n3, n4)
 		end
 	end)
 
@@ -2513,6 +2362,7 @@ do
 
 			local timeFarmed = getgenv().TimeFarmed
 			tbl3.timer.Text = string.format("%02d:%02d:%02d", math.floor(timeFarmed / 3600), math.floor(timeFarmed % 3600 / 60), timeFarmed % 60)
+			islandText.Text = string.format("%s  ·  %d KILLS  ·  %d/HR", tbl3.timer.Text, n3, n4)
 			task.wait(1)
 		end
 	end)
@@ -2524,7 +2374,6 @@ do
 		character:GetAttributeChangedSignal("Ulted"):Connect(function()
 			if localPlayer.Character:GetAttribute("Ulted") then
 				n8 += 1
-				print("[Any TSB Farm] Ulted detected, time ulted: " .. tostring(n8))
 			end
 		end)
 	end)
@@ -2535,35 +2384,16 @@ do
 		localPlayer.Character:GetAttributeChangedSignal("Ulted"):Connect(function()
 			if localPlayer.Character:GetAttribute("Ulted") then
 				n8 += 1
-				print("[Any TSB Farm] Ulted detected, time ulted: " .. tostring(n8))
 			end
 		end)
 	end
 end
 
 do
-	local tbl4 = {
-		{
-			QueryV2 = true,
-			Page = 1,
-			Filters = {
-				Countries = { [v.country] = true },
-				Tags = {},
-				HideFull = true,
-				HideTagged = false,
-				FriendsOnly = false,
-				HidePassword = false,
-			},
-			limit = 60,
-			Category = "Server List",
-			Region = v.country,
-			Sort = { Keys = { { By = "kills", Dir = "low" } } },
-			Search = "",
-			notFull = false,
-		},
-	}
-
 	local function fn8()
+		if type(queue_on_teleport) ~= "function" then
+			return
+		end
 		local str = string.format([[getgenv().TimeFarmed=%d
 getgenv().SavedCarriedKills=%d
 getgenv().SavedEmotes=%d
@@ -2577,12 +2407,16 @@ loadstring(readfile("AnyHub/TSBFarm/bootstrap.lua"))()
 		pcall(queue_on_teleport, str)
 	end
 
+	fn8()
+
 	local function fn9(arg)
+		if type(arg) ~= "table" or type(arg.servers) ~= "table" then
+			return nil
+		end
 		local tbl5 = {}
 
 		for _, server in ipairs(arg.servers) do
 			local players = server.players
-
 			if players and players >= 10 and players <= 13 and server.id ~= game.JobId then
 				table.insert(tbl5, server)
 			end
@@ -2600,15 +2434,12 @@ loadstring(readfile("AnyHub/TSBFarm/bootstrap.lua"))()
 
 	doHopServer = function()
 		local flag12 = not flag11 and not flag10
-
 		if flag12 then
 			flag12 = not (doServerHop and flag3)
 		end
-
 		if flag12 then
 			return
 		end
-
 		if flag9 then
 			return
 		end
@@ -2624,17 +2455,36 @@ loadstring(readfile("AnyHub/TSBFarm/bootstrap.lua"))()
 		end
 
 		fn8()
-		local response = game:GetService("ReplicatedStorage"):WaitForChild("Ranked"):WaitForChild("GetServerBrowserData"):InvokeServer(unpack(tbl4))
+		if v.webhookUrl and v.webhookUrl ~= "" then
+			task.spawn(pcall, fn6)
+		end
+
+		local tbl4 = {
+			{
+				QueryV2 = true,
+				Page = 1,
+				Filters = {
+					Countries = { [v.country] = true },
+					Tags = {},
+					HideFull = true,
+					HideTagged = false,
+					FriendsOnly = false,
+					HidePassword = false,
+				},
+				limit = 60,
+				Category = "Server List",
+				Region = v.country,
+				Sort = { Keys = { { By = "kills", Dir = "low" } } },
+				Search = "",
+				notFull = false,
+			},
+		}
+
+		local ok, response = pcall(function()
+			return game:GetService("ReplicatedStorage"):WaitForChild("Ranked"):WaitForChild("GetServerBrowserData"):InvokeServer(unpack(tbl4))
+		end)
 		task.wait(2)
 		flag = false
-
-		if getgenv().PBF_WS then
-			pcall(function()
-				getgenv().PBF_WS:Close()
-			end)
-
-			getgenv().PBF_WS = nil
-		end
 
 		if flag11 then
 			localPlayer:Kick("[Any TSB Farm] Kicked by force-hop system.")
@@ -2642,30 +2492,24 @@ loadstring(readfile("AnyHub/TSBFarm/bootstrap.lua"))()
 
 		task.spawn(function()
 			while true do
-				print("[Any TSB Farm] Hopping ...")
-
 				if not flag11 then
-					response = game:GetService("ReplicatedStorage"):WaitForChild("Ranked"):WaitForChild("GetServerBrowserData"):InvokeServer(unpack(tbl4))
+					ok, response = pcall(function()
+						return game:GetService("ReplicatedStorage"):WaitForChild("Ranked"):WaitForChild("GetServerBrowserData"):InvokeServer(unpack(tbl4))
+					end)
 				end
 
-				local v3 = fn9(response)
+				local v3 = ok and fn9(response) or nil
 
 				if v3 then
-					if stafforcehop then
-						pcall(function()
-							TeleportService:TeleportToPlaceInstance(game.PlaceId, v3.id, localPlayer)
-						end)
-					else
-						pcall(function()
-							game:GetService("ReplicatedStorage"):WaitForChild("Ranked"):WaitForChild("CustomServerHandler"):InvokeServer({
-								Action = "JoinServer",
-								JobId = v3.id,
-								ServerCode = v3.serverCode or "",
-								JoinCode = v3.joinCode or "",
-								Password = nil,
-							})
-						end)
-					end
+					pcall(function()
+						game:GetService("ReplicatedStorage"):WaitForChild("Ranked"):WaitForChild("CustomServerHandler"):InvokeServer({
+							Action = "JoinServer",
+							JobId = v3.id,
+							ServerCode = v3.serverCode or "",
+							JoinCode = v3.joinCode or "",
+							Password = nil,
+						})
+					end)
 				end
 
 				task.wait(3)
@@ -2674,52 +2518,33 @@ loadstring(readfile("AnyHub/TSBFarm/bootstrap.lua"))()
 	end
 
 	textButton2.MouseButton1Click:Connect(function()
-		print("[Any TSB Farm] Hop server manually...")
 		flag10 = true
 		doHopServer()
 	end)
 
+	GuiService.ErrorMessageChanged:Connect(function()
+		fn8()
+		task.spawn(function()
+			while true do
+				pcall(function()
+					TeleportService:Teleport(game.PlaceId, localPlayer)
+				end)
+				task.wait(3)
+			end
+		end)
+	end)
+
 	local tbl5 = {
-		422755031,
-		198131804,
-		681405668,
-		3414432341,
-		339633571,
-		430966809,
-		2039323684,
-		117723419,
-		1015595932,
-		263944298,
-		112905203,
-		2284964418,
-		1266437961,
-		3120648134,
-		1148139861,
-		1633233654,
-		3350014406,
-		971193650,
-		661273560,
-		66105529,
-		77342385,
-		167343092,
-		2055306963,
-		141984224,
-		438917845,
-		1391134999,
-		1796550069,
-		255671730,
-		3162123826,
-		1059541187,
-		1259898795,
-		31070091,
-		1041867508,
-		994994173,
-		1446694201,
-		77525605,
-		1001242712,
-		2533866869,
-		4983064295,
+		422755031, 198131804, 681405668, 3414432341, 339633571, 430966809,
+		2039323684, 117723419, 1015595932, 263944298, 112905203, 2284964418,
+		1266437961, 3120648134, 1148139861, 1633233654, 3350014406, 971193650,
+		661273560, 66105529, 77342385, 167343092, 2055306963, 141984224,
+		438917845, 1391134999, 1796550069, 255671730, 3162123826, 1059541187,
+		1259898795, 31070091, 1041867508, 994994173, 1446694201, 77525605,
+		1001242712, 2533866869, 4983064295,
 	}
+
+	local killWatchConns = {}
 
 	local function fn10(arg)
 		if arg == localPlayer then
@@ -2734,15 +2559,12 @@ loadstring(readfile("AnyHub/TSBFarm/bootstrap.lua"))()
 			local ok2, result2 = pcall(function()
 				return arg:GetRoleInGroup(12013007)
 			end)
-
 			local v3 = ok2 and result2
 			local flag12 = false
-
 			if v3 then
 				local str = result2:lower()
 				flag12 = str:find("moderator") or str:find("developer") or str:find("contributor") or str:find("tester") or str:find("owner") or str:find("anomaly player")
 			end
-
 			if flag12 then
 				fn4(false)
 				flag11 = true
@@ -2760,98 +2582,51 @@ loadstring(readfile("AnyHub/TSBFarm/bootstrap.lua"))()
 			end
 		end
 
-		local tbl6 = {}
-
 		for _, v3 in ipairs(tbl5) do
 			local ok2, result2 = pcall(function()
 				return arg:IsFriendsWith(v3)
 			end)
-
 			if ok2 and result2 then
-				local ok3, result3 = pcall(function()
-					return Players:GetNameFromUserIdAsync(v3)
-				end)
-
-				if ok3 then
-					local displayName = result3
-
-					pcall(function()
-						local userInfosByUserIdsAsync = game:GetService("UserService"):GetUserInfosByUserIdsAsync({ v3 })
-
-						if userInfosByUserIdsAsync and userInfosByUserIdsAsync[1] then
-							displayName = userInfosByUserIdsAsync[1].DisplayName
-						end
-					end)
-
-					tbl6[#tbl6 + 1] = displayName .. "(@" .. result3 .. ")"
-				end
+				fn4(false)
+				flag11 = true
+				doHopServer()
+				return
 			end
 		end
 
-		if #tbl6 > 0 then
-			fn4(false)
-			flag11 = true
-			doHopServer()
-			return
-		end
-
 		local leaderstats = arg:FindFirstChild("leaderstats")
-		local totalKills
+		local totalKills = leaderstats and leaderstats:FindFirstChild("Total Kills") or arg:FindFirstChild("Total Kills")
 
-		if leaderstats then
-			totalKills = leaderstats:FindFirstChild("Total Kills")
-		else
-			totalKills = arg:FindFirstChild("Total Kills")
-		end
-
-		if totalKills and totalKills.Value >= 30000 then
+		if totalKills and totalKills.Value >= 100000 then
 			doHopServer()
 			return true
 		end
 
-		if not totalKills then
-			local connection = nil
-
-			connection = arg.ChildAdded:Connect(function(child)
-				if child.Name == "leaderstats" then
-					connection:Disconnect()
-					local connection2 = nil
-
-					connection2 = child.ChildAdded:Connect(function(child2)
-						if child2.Name == "Total Kills" then
-							connection2:Disconnect()
-							if child2.Value >= 30000 then
-								doHopServer()
-								return
-							end
-							local connection3 = nil
-
-							connection3 = child2:GetPropertyChangedSignal("Value"):Connect(function()
-								if child2.Value >= 30000 then
-									connection3:Disconnect()
-									doHopServer()
-								end
-							end)
-						end
-					end)
+		if totalKills then
+			killWatchConns[arg] = totalKills:GetPropertyChangedSignal("Value"):Connect(function()
+				if totalKills.Value >= 100000 then
+					if killWatchConns[arg] then
+						killWatchConns[arg]:Disconnect()
+						killWatchConns[arg] = nil
+					end
+					doHopServer()
 				end
 			end)
-
-			return
 		end
-
-		local connection = nil
-
-		connection = totalKills:GetPropertyChangedSignal("Value"):Connect(function()
-			if totalKills.Value >= 30000 then
-				connection:Disconnect()
-				doHopServer()
-			end
-		end)
 	end
 
 	Players.PlayerAdded:Connect(function(player)
 		task.spawn(pcall, fn10, player)
+	end)
+
+	Players.PlayerRemoving:Connect(function(player)
+		ignoredTargets[player] = nil
+		if killWatchConns[player] then
+			pcall(function()
+				killWatchConns[player]:Disconnect()
+			end)
+			killWatchConns[player] = nil
+		end
 	end)
 
 	for _, player in pairs(Players:GetPlayers()) do
@@ -2859,252 +2634,7 @@ loadstring(readfile("AnyHub/TSBFarm/bootstrap.lua"))()
 			task.spawn(pcall, fn10, player)
 		end
 	end
-
-	local str = "undefined"
-
-	pcall(function()
-		if type(gethwid) == "function" then
-			str = gethwid() or "none"
-		elseif type(getfingerprintid) == "function" then
-			str = getfingerprintid() or "none"
-		elseif type(getdeviceid) == "function" then
-			str = getdeviceid() or "none"
-		end
-	end)
-
-	local name = localPlayer.Name
-	local str2 = "wss://pbf-websocket.baovq-tiger.workers.dev/?" .. "serverid=" .. game.JobId .. "&service=publicfarm" .. "&ispremium=" .. tostring(flag2) .. "&username=" .. name .. "&hwid=" .. str
-
-	if getgenv().PBF_WS then
-		pcall(function()
-			getgenv().PBF_WS:Close()
-		end)
-
-		getgenv().PBF_WS = nil
-	end
-
-	local n9 = 10
-	local n10 = 2
-	local flag12 = false
-
-	local function fn11(arg)
-		local ok, result = pcall(function()
-			return game:GetService("HttpService"):JSONDecode(arg)
-		end)
-
-		if not ok or not result then
-			return
-		end
-
-		if result.command == "server_hop" then
-			flag = false
-
-			if getgenv().PBF_WS then
-				pcall(function()
-					getgenv().PBF_WS:Close()
-				end)
-
-				getgenv().PBF_WS = nil
-			end
-
-			print("[Any TSB Farm] Received hop server command for: " .. name)
-			flag10 = true
-			doHopServer()
-		end
-
-		if result.command == "kill_dup_session" then
-			flag = false
-			flag12 = true
-
-			if getgenv().PBF_WS then
-				pcall(function()
-					getgenv().PBF_WS:Close()
-				end)
-
-				getgenv().PBF_WS = nil
-			end
-
-			game.Players.LocalPlayer:Kick("[Any TSB Farm] You got kicked because of duplicate session!")
-			task.wait(2)
-			game:Shutdown()
-		end
-
-		if result.command == "kill_session" then
-			flag = false
-			flag12 = true
-
-			if getgenv().PBF_WS then
-				pcall(function()
-					getgenv().PBF_WS:Close()
-				end)
-
-				getgenv().PBF_WS = nil
-			end
-
-			game.Players.LocalPlayer:Kick("[Any TSB Farm] You got kicked by an admin!")
-			task.wait(2)
-			game:Shutdown()
-		end
-	end
-
-	local function fn12()
-		local ok, result = pcall(function()
-			getgenv().PBF_WS = WebSocket.connect(str2)
-		end)
-
-		if not ok or not getgenv().PBF_WS then
-			return false, tostring(result)
-		end
-		flag = true
-		print("[Any TSB Farm] Server connected")
-		getgenv().PBF_WS.OnMessage:Connect(fn11)
-
-		getgenv().PBF_WS.OnClose:Connect(function()
-			flag = false
-			print("[Any TSB Farm] Server closed")
-		end)
-
-		return true
-	end
-
-	task.spawn(function()
-		local n11 = 0
-		local n12 = 2
-
-		while not flag12 do
-			n11 += 1
-			print("[Any TSB Farm] Connecting... (attempt " .. n11 .. ")")
-			local flag13, flag14
-
-			if fn12() then
-				while flag do
-					task.wait(1)
-				end
-
-				if not flag12 then
-					print("[Any TSB Farm] Disconnected, reconnecting in " .. n10 .. "s...")
-					task.wait(2)
-					n12 = 2
-					flag13 = n11 >= n9
-					flag14 = flag13 and not flag
-
-					if flag14 then
-						warn("[Any TSB Farm] Max retries reached, giving up")
-						break
-					else
-						continue
-					end
-				end
-			else
-				warn("[Any TSB Farm] Connect failed (attempt " .. n11 .. "), retrying in " .. n12 .. "s...")
-				task.wait(n12)
-				n12 = math.min(n12 * 2, 30)
-				flag13 = n11 >= n9
-				flag14 = flag13 and not flag
-
-				if flag14 then
-					warn("[Any TSB Farm] Max retries reached, giving up")
-					break
-				else
-					continue
-				end
-			end
-
-			break
-		end
-	end)
-
-	local Players2 = game:GetService("Players")
-
-	local function fn13()
-		local players = Players2:GetPlayers()
-		local tbl6 = {}
-
-		for _, player in ipairs(players) do
-			local function fn14(arg)
-				local match = arg:match("^([^_]+)_")
-				return match and match:lower() or nil
-			end
-
-			local v3 = fn14(player.Name)
-			local v4 = fn14(player.DisplayName)
-
-			local function fn15(arg, arg2)
-				if not arg then
-					return
-				end
-
-				if not tbl6[arg] then
-					tbl6[arg] = {}
-				end
-
-				table.insert(tbl6[arg], { player = player, source = arg2, original = arg2 == "username" and player.Name or player.DisplayName })
-			end
-
-			fn15(v3, "username")
-			fn15(v4, "displayname")
-		end
-
-		local tbl7 = {}
-
-		for k, v3 in pairs(tbl6) do
-			local tbl8 = {}
-			local tbl9 = {}
-
-			for _, v4 in ipairs(v3) do
-				if not tbl8[v4.player.UserId] then
-					tbl8[v4.player.UserId] = true
-					table.insert(tbl9, v4)
-				end
-			end
-
-			if #tbl9 >= 2 then
-				tbl7[k] = tbl9
-			end
-		end
-
-		return tbl7
-	end
-
-	local function fn14(arg)
-		local flag13 = false
-
-		for k, v3 in pairs(arg) do
-			print("[ZKClanScan] Clan detected: [" .. k .. "] — " .. #v3 .. " members")
-
-			for _, v4 in ipairs(v3) do
-				print("  - " .. v4.player.Name .. " (" .. v4.player.DisplayName .. ") matched via " .. v4.source .. ": " .. v4.original)
-			end
-
-			flag13 = true
-		end
-
-		if not flag13 then
-			print("[ZKClanScan] No clans detected")
-		else
-			print("[ZKClanScan] Clans detected, hop server...")
-			flag10 = true
-			doHopServer()
-		end
-	end
-
-	task.spawn(function()
-		print("[ZKClanScan] Scanning server...")
-		local v3 = fn13()
-		fn14(v3)
-
-		Players2.PlayerAdded:Connect(function()
-			task.wait(1)
-			print("[ZKClanScan] New player joined, rescanning...")
-			local v4 = fn13()
-			fn14(v4)
-		end)
-	end)
 end
-
-deathCounterConns = {}
-deathCounterDebounce = {}
-hookedChars = {}
 
 do
 	local flag9 = false
@@ -3113,11 +2643,6 @@ do
 		return 0
 	end
 
-	local function fn9(arg)
-		return arg:IsA("Accessory") and arg.Name == "Counter"
-	end
-
-	local flag10 = false
 	local connection = nil
 
 	local function fn10(cFrame2)
@@ -3154,7 +2679,6 @@ do
 			camera.CFrame = cFrame2
 			localPlayer.CameraMode = Enum.CameraMode.Classic
 			local head = character:FindFirstChild("Head")
-
 			if head then
 				head.Anchored = false
 			end
@@ -3165,17 +2689,14 @@ do
 		local ok, result = pcall(function()
 			return arg.DisplayName
 		end)
-
 		if not ok or not result or result == "" then
 			return arg.Name
 		end
-
 		for _, player in pairs(Players:GetPlayers()) do
 			if player ~= arg and player.DisplayName == result then
 				return arg.Name
 			end
 		end
-
 		return result
 	end
 
@@ -3256,7 +2777,6 @@ do
 				end
 
 				local cameraSubject = workspace.CurrentCamera and workspace.CurrentCamera.CameraSubject
-
 				if workspace.CurrentCamera then
 					workspace.CurrentCamera.CameraSubject = nil
 				end
@@ -3272,7 +2792,6 @@ do
 						pcall(function()
 							arg2:Stop()
 						end)
-
 						flag11 = true
 					end
 
@@ -3294,11 +2813,9 @@ do
 				if character3 then
 					local freeze = character3:FindFirstChild("Freeze")
 					local noRotate = character3:FindFirstChild("NoRotate")
-
 					if freeze then
 						freeze:Destroy()
 					end
-
 					if noRotate then
 						noRotate:Destroy()
 					end
@@ -3315,13 +2832,11 @@ do
 			return
 		end
 		local humanoid = arg:FindFirstChildOfClass("Humanoid")
-
 		if humanoid then
 			fn13(humanoid)
 		else
 			task.spawn(function()
 				local humanoid2 = arg:WaitForChild("Humanoid", 5)
-
 				if humanoid2 then
 					fn13(humanoid2)
 				end
@@ -3335,82 +2850,6 @@ do
 		task.wait(0.1)
 		fn14(character)
 	end)
-
-	local function fn15(arg, arg2)
-		if not arg or not arg2 or arg2 == localPlayer then
-			return
-		end
-
-		if hookedChars[arg] then
-			return
-		end
-		hookedChars[arg] = true
-
-		for _, child in pairs(arg:GetChildren()) do
-			if fn9(child) then
-				local flag11 = false
-
-				if flag10 then
-					flag11 = not deathCounterDebounce[arg2]
-				end
-
-				if flag11 then
-					deathCounterDebounce[arg2] = true
-				end
-			end
-		end
-
-		local connection2 = arg.ChildAdded:Connect(function(child)
-			if not flag10 then
-				return
-			end
-
-			if not fn9(child) then
-				return
-			end
-
-			if deathCounterDebounce[arg2] then
-				return
-			end
-			deathCounterDebounce[arg2] = true
-		end)
-
-		table.insert(deathCounterConns, connection2)
-	end
-
-	local function fn16(arg)
-		if arg == localPlayer then
-			return
-		end
-
-		if arg.Character then
-			task.spawn(fn15, arg.Character, arg)
-		end
-
-		local connection2 = arg.CharacterAdded:Connect(function(character)
-			if not flag10 then
-				return
-			end
-			task.wait(0.1)
-			fn15(character, arg)
-		end)
-
-		table.insert(deathCounterConns, connection2)
-	end
-
-	for _, v3 in pairs(deathCounterConns) do
-		pcall(v3.Disconnect, v3)
-	end
-
-	for _, player in pairs(Players:GetPlayers()) do
-		fn16(player)
-	end
-
-	table.insert(deathCounterConns, Players.PlayerAdded:Connect(function(player)
-		if flag10 then
-			fn16(player)
-		end
-	end))
 
 	local tbl4 = {}
 	local tbl5 = {}
@@ -3447,7 +2886,6 @@ do
 			pcall(function()
 				tbl4[arg]:Disconnect()
 			end)
-
 			tbl4[arg] = nil
 		end
 
@@ -3470,13 +2908,11 @@ do
 
 		local function fn18(arg3, arg4)
 			local match = tostring(arg4):match("%d+")
-
 			for _, v3 in pairs(arg3:GetPlayingAnimationTracks()) do
 				if v3.Animation.AnimationId:match(match) then
 					return v3
 				end
 			end
-
 			return nil
 		end
 
@@ -3523,7 +2959,6 @@ do
 
 					if sethiddenproperty then
 						local humanoidRootPart3 = localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart")
-
 						if humanoidRootPart3 then
 							pcall(function()
 								sethiddenproperty(humanoidRootPart3, "PhysicsRepRootPart", nil)
@@ -3566,7 +3001,6 @@ do
 						pcall(function()
 							part:Destroy()
 						end)
-
 						connection2:Disconnect()
 						connection3:Disconnect()
 					end
@@ -3620,75 +3054,38 @@ do
 
 				if animationId:match("13927612951") and arg2:GetAttribute("Ulted") ~= nil then
 					local now = tick()
-
 					fn19(function()
 						local position = humanoidRootPart.Position
 						local flag11 = (fn22() - position).Magnitude > 150
-						local flag12
-
-						if flag11 then
-							flag12 = flag11
-						else
-							local n9 = now + 2.5
-							flag12 = tick() >= n9
-						end
-
-						return flag12
+						return flag11 or tick() >= now + 2.5
 					end)
 				end
 
 				if animationId:match("12342141464") then
 					task.wait(3.5)
 					local now = tick()
-
 					fn19(function()
 						local position = humanoidRootPart.Position
 						local flag11 = (fn22() - position).Magnitude > 125
-						local flag12
-
-						if flag11 then
-							flag12 = flag11
-						else
-							local n9 = now + 1.25
-							flag12 = tick() >= n9
-						end
-
-						return flag12
+						return flag11 or tick() >= now + 1.25
 					end)
 				end
 
 				if animationId:match("12463072679") then
 					local now = tick()
-
 					fn19(function()
 						local position = humanoidRootPart.Position
 						local flag11 = (fn22() - position).Magnitude > 25
-						local flag12
-
-						if flag11 then
-							flag12 = flag11
-						else
-							local n9 = now + 0.75
-							flag12 = tick() >= n9
-						end
-
-						return flag12
+						return flag11 or tick() >= now + 0.75
 					end)
 				end
 
 				if animationId:match("13603396939") then
 					local now = tick()
-
 					fn19(function()
 						local cFrame2 = humanoidRootPart.CFrame
 						local flag11 = (fn22() - (cFrame2 * CFrame.new(0, 0, -1)).Position).Magnitude > 7.5 or isCountering(humanoid)
-
-						if not flag11 then
-							local n9 = now + 2.5
-							flag11 = tick() >= n9
-						end
-
-						return flag11
+						return flag11 or tick() >= now + 2.5
 					end)
 				end
 
@@ -3698,13 +3095,11 @@ do
 
 					while true do
 						v4.CFrame = humanoidRootPart.CFrame * CFrame.new(0, 0, -6.25)
-
 						if v5() and not isCountering(humanoid) then
 							getgenv().desync = { CFrame = cframe }
 						else
 							getgenv().desync = nil
 						end
-
 						RunService.RenderStepped:Wait()
 						if not (tick() >= now + 1.85 or not arg3.IsPlaying) then
 							continue
@@ -3718,35 +3113,18 @@ do
 
 				if animationId:match("14057231976") then
 					local now = tick()
-
 					fn19(function()
 						local position = humanoidRootPart.Position
 						local flag11 = (fn22() - position).Magnitude > 10
-						local flag12
-
-						if flag11 then
-							flag12 = flag11
-						else
-							local n9 = now + 0.5
-							flag12 = tick() >= n9
-						end
-
-						return flag12
+						return flag11 or tick() >= now + 0.5
 					end)
 
 					task.wait(0.5)
 					local now2 = tick()
-
 					fn19(function()
 						local position = humanoidRootPart.Position
 						local flag11 = (fn22() - position).Magnitude > 10 or isCountering(humanoid)
-
-						if not flag11 then
-							local n9 = now2 + 1.25
-							flag11 = tick() >= n9
-						end
-
-						return flag11
+						return flag11 or tick() >= now2 + 1.25
 					end)
 				end
 
@@ -3756,13 +3134,11 @@ do
 
 					while true do
 						v4.CFrame = humanoidRootPart.CFrame * CFrame.new(0, 0, -37.5)
-
 						if v5() and not isCountering(humanoid) then
 							getgenv().desync = { CFrame = cframe }
 						else
 							getgenv().desync = nil
 						end
-
 						RunService.RenderStepped:Wait()
 						if not (tick() >= now + 1.5 or not arg3.IsPlaying) then
 							continue
@@ -3776,152 +3152,90 @@ do
 
 				if animationId:match("72451715583225") then
 					local now = tick()
-
 					fn19(function()
 						local position = humanoidRootPart.Position
 						local flag11 = (fn22() - position).Magnitude > 15
-						local flag12
-
-						if flag11 then
-							flag12 = flag11
-						else
-							local n9 = now + 0.75
-							flag12 = tick() >= n9
-						end
-
-						return flag12
+						return flag11 or tick() >= now + 0.75
 					end)
 				end
 
 				if animationId:match("13813955149") then
 					local position = humanoidRootPart.Position
-
 					if (fn22() - position).Magnitude <= 25 then
 						getgenv().desync = { CFrame = CFrame.new(9e9, 9e9, 9e9) }
 						task.wait(0.75)
 						getgenv().desync = nil
 					end
 
-					local connection2 = nil
-
-					connection2 = workspace.Thrown.ChildAdded:Connect(function(child)
-						if child:IsA("MeshPart") and child.Name:lower() == "trash can" then
-							connection2:Disconnect()
-							local now = tick()
-
-							fn19(function()
-								local position2 = child.Position
-								local flag11 = (fn22() - position2).Magnitude > 25
-								local flag12
-
-								if flag11 then
-									flag12 = flag11
-								else
-									local n9 = now + 2
-									flag12 = tick() >= n9
-								end
-
-								return flag12
-							end)
-						end
-					end)
+					local thrownFolder = workspace:FindFirstChild("Thrown")
+					if thrownFolder then
+						local connection2 = nil
+						connection2 = thrownFolder.ChildAdded:Connect(function(child)
+							if child:IsA("MeshPart") and child.Name:lower() == "trash can" then
+								connection2:Disconnect()
+								local now = tick()
+								fn19(function()
+									local position2 = child.Position
+									local flag11 = (fn22() - position2).Magnitude > 25
+									return flag11 or tick() >= now + 2
+								end)
+							end
+						end)
+					end
 				end
 
 				if animationId:match("15128849047") then
 					local now = tick()
-
 					fn19(function()
 						local position = humanoidRootPart.Position
 						local flag11 = (fn22() - position).Magnitude > 100 or fn18(humanoid, "15123665491")
-
-						if not flag11 then
-							local n9 = now + 3
-							flag11 = tick() >= n9
-						end
-
-						return flag11
+						return flag11 or tick() >= now + 3
 					end)
 				end
 
 				if animationId:match("15391323441") then
 					task.wait(5.5)
 					local now = tick()
-
 					fn19(function()
 						local position = humanoidRootPart.Position
 						local flag11 = (fn22() - position).Magnitude > 125
-						local flag12
-
-						if flag11 then
-							flag12 = flag11
-						else
-							local n9 = now + 1
-							flag12 = tick() >= n9
-						end
-
-						return flag12
+						return flag11 or tick() >= now + 1
 					end)
 				end
 
 				if animationId:match("16082123712") then
 					task.wait(2.5)
 					local now = tick()
-
 					fn19(function()
 						local position = humanoidRootPart.Position
 						local flag11 = (fn22() - position).Magnitude > 50
-						local flag12
-
-						if flag11 then
-							flag12 = flag11
-						else
-							local n9 = now + 1.5
-							flag12 = tick() >= n9
-						end
-
-						return flag12
+						return flag11 or tick() >= now + 1.5
 					end)
 				end
 
 				if animationId:match("14719290328") then
 					local position = humanoidRootPart.Position
-
 					if (fn22() - position).Magnitude <= 50 then
 						getgenv().desync = { CFrame = CFrame.new(9e9, 9e9, 9e9) }
 					end
 
 					task.wait(0.5)
-
 					if arg3.IsPlaying then
 						local now = tick()
-
 						fn19(function()
 							local position2 = humanoidRootPart.Position
 							local flag11 = (fn22() - position2).Magnitude > 50 or fn20(humanoid2)
-
-							if not flag11 then
-								local n9 = now + 3.5
-								flag11 = tick() >= n9
-							end
-
-							return flag11 or not arg3.IsPlaying
+							return flag11 or tick() >= now + 3.5 or not arg3.IsPlaying
 						end)
 					end
 				end
 
 				if animationId:match("15520132233") then
 					local now = tick()
-
 					fn19(function()
 						local position = humanoidRootPart.Position
 						local flag11 = (fn22() - position).Magnitude > 50 or fn20(humanoid2)
-
-						if not flag11 then
-							local n9 = now + 3.3
-							flag11 = tick() >= n9
-						end
-
-						return flag11 or not arg3.IsPlaying
+						return flag11 or tick() >= now + 3.3 or not arg3.IsPlaying
 					end)
 
 					repeat
@@ -3929,17 +3243,10 @@ do
 					until now + 5.5 <= tick()
 
 					local now2 = tick()
-
 					fn19(function()
 						local position = humanoidRootPart.Position
 						local flag11 = (fn22() - position).Magnitude > 100 or fn20(humanoid2)
-
-						if not flag11 then
-							local n9 = now2 + 1
-							flag11 = tick() >= n9
-						end
-
-						return flag11 or not arg3.IsPlaying
+						return flag11 or tick() >= now2 + 1 or not arg3.IsPlaying
 					end)
 				end
 
@@ -3949,13 +3256,11 @@ do
 
 					while true do
 						v4.CFrame = humanoidRootPart.CFrame * CFrame.new(0, 0, -75)
-
 						if v5() and not fn20(humanoid2) then
 							getgenv().desync = { CFrame = cframe }
 						else
 							getgenv().desync = nil
 						end
-
 						RunService.RenderStepped:Wait()
 						if not (tick() >= now + 2 or not arg3.IsPlaying) then
 							continue
@@ -3970,46 +3275,25 @@ do
 				if animationId:match("16057411888") then
 					task.wait(4.25)
 					local now = tick()
-
 					fn19(function()
 						local position = humanoidRootPart.Position
 						local flag11 = (fn22() - position).Magnitude > 50
-						local flag12
-
-						if flag11 then
-							flag12 = flag11
-						else
-							local n9 = now + 2
-							flag12 = tick() >= n9
-						end
-
-						return flag12
+						return flag11 or tick() >= now + 2
 					end)
 				end
 
 				if animationId:match("18435535291") then
 					task.wait(4.25)
 					local now = tick()
-
 					fn19(function()
 						local position = humanoidRootPart.Position
 						local flag11 = (fn22() - position).Magnitude > 100
-						local flag12
-
-						if flag11 then
-							flag12 = flag11
-						else
-							local n9 = now + 1.25
-							flag12 = tick() >= n9
-						end
-
-						return flag12
+						return flag11 or tick() >= now + 1.25
 					end)
 				end
 
 				if animationId:match("17857788598") then
 					task.wait(0.65)
-
 					if arg3.IsPlaying then
 						local part = Instance.new("Part", workspace)
 						part.Anchored = true
@@ -4031,16 +3315,13 @@ do
 						end)
 
 						local now = tick()
-
 						while true do
 							part.CFrame = humanoidRootPart.CFrame
-
 							if flag11 and not fn18(humanoid, "15128849047") then
 								getgenv().desync = { CFrame = CFrame.new(9e9, 9e9, 9e9) }
 							else
 								getgenv().desync = nil
 							end
-
 							RunService.RenderStepped:Wait()
 							if not (tick() >= now + 0.85 or not arg3.IsPlaying) then
 								continue
@@ -4051,7 +3332,6 @@ do
 						getgenv().desync = nil
 						connection2:Disconnect()
 						connection3:Disconnect()
-
 						pcall(function()
 							part:Destroy()
 						end)
@@ -4062,77 +3342,38 @@ do
 					task.wait(0.5)
 					local cFrame2 = humanoidRootPart.CFrame
 					local now = tick()
-
 					fn19(function()
 						local position = humanoidRootPart.Position
 						local flag11 = (fn22() - position).Magnitude > 75
-
-						if not flag11 then
-							local n9 = now + 1.25
-							flag11 = tick() >= n9
-						end
-
-						return flag11 or not arg3.IsPlaying
+						return flag11 or tick() >= now + 1.25 or not arg3.IsPlaying
 					end)
 
 					task.wait(1)
 					local now2 = tick()
-
 					fn19(function()
 						local position = cFrame2.Position
 						local flag11 = (fn22() - position).Magnitude > 75
-						local flag12
-
-						if flag11 then
-							flag12 = flag11
-						else
-							local n9 = now2 + 1.75
-							flag12 = tick() >= n9
-						end
-
-						return flag12
+						return flag11 or tick() >= now2 + 1.75
 					end)
 				end
 
 				if animationId:match("18896229321") then
 					local now = tick()
-
 					fn19(function()
 						local position = humanoidRootPart.Position
 						local flag11 = (fn22() - position).Magnitude > 15 or isCountering(humanoid)
-						local flag12
-
-						if flag11 then
-							flag12 = flag11
-						else
-							local n9 = now + 3.5
-							flag12 = tick() >= n9
-						end
-
-						return flag12 or not arg3.IsPlaying
+						return flag11 or tick() >= now + 3.5 or not arg3.IsPlaying
 					end)
 
 					task.wait(1)
-
 					if arg3.IsPlaying then
 						local position = humanoidRootPart.Position
-
 						if (fn22() - position).Magnitude <= 25 then
 							local now2 = tick()
-
 							fn19(function()
 								local position2 = humanoidRootPart.Position
 								local flag11 = (fn22() - position2).Magnitude > 25
-								local flag12
-
-								if flag11 then
-									flag12 = flag11
-								else
-									local n9 = now2 + 2
-									flag12 = tick() >= n9
-								end
-
-								return flag12 or not arg3.IsPlaying
+								return flag11 or tick() >= now2 + 2 or not arg3.IsPlaying
 							end)
 						end
 					end
@@ -4140,52 +3381,31 @@ do
 
 				if animationId:match("18897119503") then
 					local now = tick()
-
 					fn19(function()
 						local position = humanoidRootPart.Position
 						local flag11 = (fn22() - position).Magnitude > 50
-						local flag12
-
-						if flag11 then
-							flag12 = flag11
-						else
-							local n9 = now + 1.5
-							flag12 = tick() >= n9
-						end
-
-						return flag12
+						return flag11 or tick() >= now + 1.5
 					end)
 				end
 
 				if animationId:match("106755459092436") or animationId:match("75502010126640") then
 					local now = tick()
-
 					fn19(function()
 						local position = humanoidRootPart.Position
 						local flag11 = (fn22() - position).Magnitude > 50
-						local flag12
-
-						if flag11 then
-							flag12 = flag11
-						else
-							local n9 = now + 2
-							flag12 = tick() >= n9
-						end
-
-						return flag12
+						return flag11 or tick() >= now + 2
 					end)
 				end
 
 				if animationId:match("16515850153") then
 					task.spawn(function()
 						local position = humanoidRootPart.Position
-
 						if (fn22() - position).Magnitude <= 15 then
 							getgenv().desync = { CFrame = CFrame.new(9e9, 9e9, 9e9) }
 						end
 
-						local dotted = workspace.Thrown:WaitForChild("Dotted", 1)
-
+						local thrownFolder = workspace:FindFirstChild("Thrown")
+						local dotted = thrownFolder and thrownFolder:WaitForChild("Dotted", 1)
 						if dotted then
 							local dots = dotted:WaitForChild("Dots", 1)
 							if not dots then
@@ -4193,25 +3413,12 @@ do
 								return
 							end
 							local now = tick()
-							local position2 = dots.Position
-
-							if (fn22() - position2).Magnitude > 20 then
+							if (fn22() - dots.Position).Magnitude > 20 then
 								getgenv().desync = nil
 							end
-
 							fn19(function()
-								local position3 = dots.Position
-								local flag11 = (fn22() - position3).Magnitude > 20 or fn20(humanoid2)
-								local flag12
-
-								if flag11 then
-									flag12 = flag11
-								else
-									local n9 = now + 4.25
-									flag12 = tick() >= n9
-								end
-
-								return flag12
+								local flag11 = (fn22() - dots.Position).Magnitude > 20 or fn20(humanoid2)
+								return flag11 or tick() >= now + 4.25
 							end)
 						else
 							getgenv().desync = nil
@@ -4221,7 +3428,6 @@ do
 
 				if animationId:match("16431491215") then
 					local now = tick()
-
 					while true do
 						task.wait()
 						local cFrame2 = humanoidRootPart.CFrame
@@ -4235,91 +3441,45 @@ do
 						fn19(function()
 							local cFrame2 = humanoidRootPart.CFrame
 							local flag11 = (fn22() - (cFrame2 * CFrame.new(0, 0, -20)).Position).Magnitude > 25 or fn18(humanoid, "15128849047")
-
-							if not flag11 then
-								local n9 = now + 0.75
-								flag11 = tick() >= n9
-							end
-
-							return flag11
+							return flag11 or tick() >= now + 0.75
 						end)
 					end
 				end
 
 				if animationId:match("16597912086") then
 					local now = tick()
-
 					fn19(function()
 						local position = humanoidRootPart.Position
 						local flag11 = (fn22() - position).Magnitude > 15 or isCountering(humanoid)
-						local flag12
-
-						if flag11 then
-							flag12 = flag11
-						else
-							local n9 = now + 0.75
-							flag12 = tick() >= n9
-						end
-
-						return flag12
+						return flag11 or tick() >= now + 0.75
 					end)
 				end
 
 				if animationId:match("17275150809") then
 					local now = tick()
-
 					fn19(function()
 						local position = humanoidRootPart.Position
 						local flag11 = (fn22() - position).Magnitude > 50
-						local flag12
-
-						if flag11 then
-							flag12 = flag11
-						else
-							local n9 = now + 1
-							flag12 = tick() >= n9
-						end
-
-						return flag12
+						return flag11 or tick() >= now + 1
 					end)
 				end
 
 				if animationId:match("17278415853") and arg2:GetAttribute("Character") == "Esper" then
 					task.wait(11)
 					local now = tick()
-
 					fn19(function()
 						local position = humanoidRootPart.Position
 						local flag11 = (fn22() - position).Magnitude > 100
-						local flag12
-
-						if flag11 then
-							flag12 = flag11
-						else
-							local n9 = now + 6
-							flag12 = tick() >= n9
-						end
-
-						return flag12
+						return flag11 or tick() >= now + 6
 					end)
 				end
 
 				if animationId:match("16734584478") then
 					local now = tick()
-
 					fn19(function()
 						local position = humanoidRootPart.Position
 						local flag11 = (fn22() - position).Magnitude > 75
-						local flag12
-
-						if flag11 then
-							flag12 = flag11
-						else
-							local n9 = now + 5.75
-							flag12 = tick() >= n9
-						end
-
-						return flag12
+						return flag11 or tick() >= now + 5.75
 					end)
 				end
 
@@ -4344,7 +3504,6 @@ do
 					end)
 
 					local now = tick()
-
 					while true do
 						part.CFrame = humanoidRootPart.CFrame * CFrame.new(0, 0, -part.Size.Z / 2)
 						RunService.RenderStepped:Wait()
@@ -4356,22 +3515,13 @@ do
 
 					if flag11 then
 						local now2 = tick()
-
 						fn19(function()
-							local flag12 = not flag11
-
-							if not flag12 then
-								local n9 = now2 + 1
-								flag12 = tick() >= n9
-							end
-
-							return flag12 or not arg3.IsPlaying
+							return not flag11 or tick() >= now2 + 1 or not arg3.IsPlaying
 						end)
 					end
 
 					connection2:Disconnect()
 					connection3:Disconnect()
-
 					pcall(function()
 						part:Destroy()
 					end)
@@ -4380,62 +3530,34 @@ do
 				if animationId:match("13294790250") then
 					task.wait(0.5)
 					local now = tick()
-
 					fn19(function()
 						local cFrame2 = humanoidRootPart.CFrame
 						local flag11 = (fn22() - (cFrame2 * CFrame.new(0, 0, -2.5)).Position).Magnitude > 10 or isCountering(humanoid)
-
-						if not flag11 then
-							local n9 = now + 0.75
-							flag11 = tick() >= n9
-						end
-
-						return flag11
+						return flag11 or tick() >= now + 0.75
 					end)
 				end
 
 				if animationId:match("13632347366") then
 					local now = tick()
-
 					fn19(function()
 						local position = humanoidRootPart.Position
 						local flag11 = (fn22() - position).Magnitude > 75 or fn20(humanoid2)
-						local flag12
-
-						if flag11 then
-							flag12 = flag11
-						else
-							local n9 = now + 1.75
-							flag12 = tick() >= n9
-						end
-
-						return flag12 or not arg3.IsPlaying
+						return flag11 or tick() >= now + 1.75 or not arg3.IsPlaying
 					end)
 				end
 
 				if animationId:match("13723174078") then
 					task.wait(0.5)
 					local now = tick()
-
 					fn19(function()
 						local position = humanoidRootPart.Position
 						local flag11 = (fn22() - position).Magnitude > 50
-						local flag12
-
-						if flag11 then
-							flag12 = flag11
-						else
-							local n9 = now + 2
-							flag12 = tick() >= n9
-						end
-
-						return flag12 or not arg3.IsPlaying
+						return flag11 or tick() >= now + 2 or not arg3.IsPlaying
 					end)
 				end
 
 				if animationId:match("13881335713") then
 					task.wait(0.75)
-
 					if arg3.IsPlaying then
 						local part = Instance.new("Part", workspace)
 						part.Anchored = true
@@ -4457,7 +3579,6 @@ do
 						end)
 
 						local now = tick()
-
 						while true do
 							part.CFrame = humanoidRootPart.CFrame * CFrame.new(0, 0, -part.Size.Z / 2)
 							RunService.RenderStepped:Wait()
@@ -4469,22 +3590,13 @@ do
 
 						if flag11 then
 							local now2 = tick()
-
 							fn19(function()
-								local flag12 = not flag11
-
-								if not flag12 then
-									local n9 = now2 + 1
-									flag12 = tick() >= n9
-								end
-
-								return flag12 or not arg3.IsPlaying
+								return not flag11 or tick() >= now2 + 1 or not arg3.IsPlaying
 							end)
 						end
 
 						connection2:Disconnect()
 						connection3:Disconnect()
-
 						pcall(function()
 							part:Destroy()
 						end)
@@ -4493,36 +3605,19 @@ do
 
 				if animationId:match("14721837245") then
 					local now = tick()
-
 					fn19(function()
 						local position = humanoidRootPart.Position
 						local flag11 = (fn22() - position).Magnitude > 25 or fn18(humanoid, "15128849047")
-
-						if not flag11 then
-							local n9 = now + 1.5
-							flag11 = tick() >= n9
-						end
-
-						return flag11 or not arg3.IsPlaying
+						return flag11 or tick() >= now + 1.5 or not arg3.IsPlaying
 					end)
 
 					if now + 1.5 <= tick() then
 						task.wait(1)
 						local now2 = tick()
-
 						fn19(function()
 							local position = humanoidRootPart.Position
 							local flag11 = (fn22() - position).Magnitude > 100
-							local flag12
-
-							if flag11 then
-								flag12 = flag11
-							else
-								local n9 = now2 + 1.5
-								flag12 = tick() >= n9
-							end
-
-							return flag12 or not arg3.IsPlaying
+							return flag11 or tick() >= now2 + 1.5 or not arg3.IsPlaying
 						end)
 					end
 				end
@@ -4554,14 +3649,12 @@ do
 					end)
 
 					local now = tick()
-
 					while true do
 						if flag11 and not fn20(humanoid2) then
 							getgenv().desync = { CFrame = CFrame.new(9e9, 9e9, 9e9) }
 						else
 							getgenv().desync = nil
 						end
-
 						RunService.RenderStepped:Wait()
 						if not (tick() >= now + 4 or not arg3.IsPlaying) then
 							continue
@@ -4572,7 +3665,6 @@ do
 					getgenv().desync = nil
 					connection2:Disconnect()
 					connection3:Disconnect()
-
 					pcall(function()
 						part:Destroy()
 					end)
@@ -4580,20 +3672,13 @@ do
 
 				if animationId:match("13146710762") then
 					task.wait(3.25)
-
 					if arg3.IsPlaying then
 						local tbl6 = {}
-						local tbl7 = {}
-						local n9 = CFrame.new(50, 0, -200) * CFrame.Angles(0, -0.26179938779914941, 0)
-						local n10 = CFrame.new(-50, 0, -200) * CFrame.Angles(0, 0.26179938779914941, 0)
-						local cframe2 = CFrame.new
-						tbl7[1] = n9
-						tbl7[2] = n10
-
-						do
-							local values = table.pack(cframe2(0, 0, -200))
-							table.move(values, 1, values.n, 3, tbl7)
-						end
+						local tbl7 = {
+							CFrame.new(50, 0, -200) * CFrame.Angles(0, -0.26179938779914941, 0),
+							CFrame.new(-50, 0, -200) * CFrame.Angles(0, 0.26179938779914941, 0),
+							CFrame.new(0, 0, -200),
+						}
 
 						local flag11 = false
 						local tbl8 = {}
@@ -4621,14 +3706,12 @@ do
 						end
 
 						local now = tick()
-
 						while true do
 							if flag11 and not fn20(humanoid2) then
 								getgenv().desync = { CFrame = CFrame.new(9e9, 9e9, 9e9) }
 							else
 								getgenv().desync = nil
 							end
-
 							RunService.RenderStepped:Wait()
 							if not (tick() >= now + 6 or not arg3.IsPlaying) then
 								continue
@@ -4637,11 +3720,9 @@ do
 						end
 
 						getgenv().desync = nil
-
 						for _, v4 in ipairs(tbl8) do
 							v4:Disconnect()
 						end
-
 						for _, v4 in ipairs(tbl6) do
 							pcall(function()
 								v4:Destroy()
@@ -4656,17 +3737,11 @@ do
 						return
 					end
 					local tbl6 = {}
-					local tbl7 = {}
-					local n9 = CFrame.new(60, 0, -250) * CFrame.Angles(0, -0.26179938779914941, 0)
-					local n10 = CFrame.new(-60, 0, -250) * CFrame.Angles(0, 0.26179938779914941, 0)
-					local cframe2 = CFrame.new
-					tbl7[1] = n9
-					tbl7[2] = n10
-
-					do
-						local values = table.pack(cframe2(0, 0, -250))
-						table.move(values, 1, values.n, 3, tbl7)
-					end
+					local tbl7 = {
+						CFrame.new(60, 0, -250) * CFrame.Angles(0, -0.26179938779914941, 0),
+						CFrame.new(-60, 0, -250) * CFrame.Angles(0, 0.26179938779914941, 0),
+						CFrame.new(0, 0, -250),
+					}
 
 					local tbl8 = { false, false, false }
 					local tbl9 = {}
@@ -4694,18 +3769,15 @@ do
 					end
 
 					local now = tick()
-
 					while true do
 						for i, v4 in ipairs(tbl6) do
 							v4.CFrame = humanoidRootPart.CFrame * tbl7[i]
 						end
-
 						if tbl8[1] or tbl8[2] or tbl8[3] then
 							getgenv().desync = { CFrame = CFrame.new(9e9, 9e9, 9e9) }
 						else
 							getgenv().desync = nil
 						end
-
 						RunService.RenderStepped:Wait()
 						if not (tick() >= now + 2.5 or not arg3.IsPlaying) then
 							continue
@@ -4714,11 +3786,9 @@ do
 					end
 
 					getgenv().desync = nil
-
 					for _, v4 in ipairs(tbl9) do
 						v4:Disconnect()
 					end
-
 					for _, v4 in ipairs(tbl6) do
 						pcall(function()
 							v4:Destroy()
@@ -4733,11 +3803,9 @@ do
 		if arg == localPlayer then
 			return
 		end
-
 		if arg.Character then
 			task.spawn(fn17, arg, arg.Character)
 		end
-
 		tbl5[arg] = arg.CharacterAdded:Connect(function(character)
 			task.spawn(fn17, arg, character)
 		end)
@@ -4754,7 +3822,6 @@ do
 
 		task.spawn(function()
 			local now = tick()
-
 			while true do
 				RunService.RenderStepped:Wait()
 				if not (player:GetAttribute("PreloadDone") or tick() >= now + 30) then
@@ -4767,7 +3834,6 @@ do
 				if player.Character then
 					task.spawn(fn17, player, player.Character)
 				end
-
 				tbl5[player] = player.CharacterAdded:Connect(function(character)
 					task.spawn(fn17, player, character)
 				end)
@@ -4780,15 +3846,12 @@ do
 			pcall(function()
 				tbl4[player]:Disconnect()
 			end)
-
 			tbl4[player] = nil
 		end
-
 		if tbl5[player] then
 			pcall(function()
 				tbl5[player]:Disconnect()
 			end)
-
 			tbl5[player] = nil
 		end
 	end)
@@ -4808,7 +3871,6 @@ do
 			pcall(function()
 				if currentCamera then
 					character:SetAttribute("NoHeadLerp", false)
-
 					if character.Humanoid then
 						currentCamera.CameraSubject = character.Humanoid
 					end
@@ -4816,33 +3878,27 @@ do
 			end)
 
 			local now = tick()
-
 			repeat
 				pcall(function()
 					character.HumanoidRootPart.CFrame = CFrame.new(character.HumanoidRootPart.Position)
 				end)
-
 				RunService.Heartbeat:Wait()
 			until tick() - now > 0.15
 
 			pcall(function()
 				character.HumanoidRootPart.AssemblyLinearVelocity = Vector3.zero
 			end)
-
 			pcall(function()
 				character.HumanoidRootPart.AssemblyAngularVelocity = Vector3.zero
 			end)
-
 			pcall(function()
 				character.HumanoidRootPart.Velocity = Vector3.zero
 			end)
-
 			pcall(function()
 				character.HumanoidRootPart.RotVelocity = Vector3.zero
 			end)
 
 			local humanoid = character:FindFirstChildOfClass("Humanoid")
-
 			if humanoid then
 				pcall(function()
 					humanoid.AutoRotate = true
@@ -4867,32 +3923,18 @@ do
 		}
 
 		local tbl10 = {
-			"17799224866",
-			"17838006839",
-			"17838619895",
-			"17857788598",
-			"17857880283",
-			"18179181663",
-			"18182425133",
-			"18464351556",
-			"18464356233",
-			"18464372850",
-			"18464362124",
-			"136370737633649",
-			"130301810149072",
-			"17889290569",
-			"10479335397",
-			"18896229321",
+			"17799224866", "17838006839", "17838619895", "17857788598",
+			"17857880283", "18179181663", "18182425133", "18464351556",
+			"18464356233", "18464372850", "18464362124", "136370737633649",
+			"130301810149072", "17889290569", "10479335397", "18896229321",
 		}
 
 		local function fn21(arg)
 			if not arg then
 				return false
 			end
-
 			for _, v3 in pairs(arg:GetPlayingAnimationTracks()) do
 				local animationId = v3.Animation.AnimationId
-
 				for _, v4 in ipairs(tbl10) do
 					if animationId:match(v4) then
 						flag5 = true
@@ -4900,7 +3942,6 @@ do
 					end
 				end
 			end
-
 			flag5 = false
 			return false
 		end
@@ -4909,14 +3950,12 @@ do
 			if not arg then
 				return false
 			end
-
 			for _, v3 in pairs(arg:GetPlayingAnimationTracks()) do
 				local animationId = v3.Animation.AnimationId
 				if animationId:match("18435535291") or animationId:match("18435383478") then
 					return true
 				end
 			end
-
 			return false
 		end
 
@@ -4926,15 +3965,12 @@ do
 			if not flag3 then
 				return
 			end
-
 			if flag11 then
 				return
 			end
-
 			if getgenv().desync then
 				return
 			end
-
 			if flag7 then
 				return
 			end
@@ -4953,7 +3989,6 @@ do
 				if not humanoid or not humanoidRootPart then
 					return
 				end
-
 				if fn22(humanoid) or humanoidRootPart.Anchored == true then
 					return
 				end
@@ -4977,7 +4012,6 @@ do
 
 				if n22 then
 					local base = n22:FindFirstChild("Base")
-
 					if base then
 						if base:FindFirstChild("Cooldown") == nil or base:FindFirstChild("Cooldown").Size.Y.Scale >= -0.2 then
 							VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Two, false, game)
@@ -4996,23 +4030,18 @@ do
 				if not character or not character2 then
 					return
 				end
-
 				if character:FindFirstChildWhichIsA("ForceField") then
 					return
 				end
-
 				if character:FindFirstChild("AbsoluteImmortal") then
 					return
 				end
-
 				if character:FindFirstChild("BeingGrabbed") then
 					return
 				end
-
 				if character:FindFirstChild("HunterCounter") then
 					return
 				end
-
 				if character:FindFirstChild("AtomicCounter") then
 					return
 				end
@@ -5034,7 +4063,6 @@ do
 
 				if not character2:GetAttribute("HoldingSpace") then
 					local communicate2 = character2:FindFirstChild("Communicate")
-
 					pcall(communicate2.FireServer, communicate2, {
 						Goal = "KeyPress",
 						Key = Enum.KeyCode.Space,
@@ -5051,8 +4079,6 @@ do
 						communicate:FireServer(unpack(tbl7))
 						task.wait(0.1)
 					end
-
-					print("spaming moves")
 
 					if not (humanoid2.Health <= 10) then
 						if not now or tick() - now >= 7 then
@@ -5078,14 +4104,11 @@ do
 					VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Four, false, game)
 				else
 					task.wait(0.1)
-					print("spaming m1")
-
 					if character2:GetAttribute("mobile") then
 						communicate:FireServer(unpack(tbl8))
 					else
 						communicate:FireServer(unpack(tbl6))
 					end
-
 					task.wait(0.1)
 					communicate:FireServer(unpack(tbl7))
 					task.wait(0.1)
@@ -5105,7 +4128,31 @@ do
 
 	local function fn22()
 		local now = nil
+		local stuckTarget = nil
+		local stuckTimer = tick()
+		local stuckHealth = 100
 		v2 = fn7()
+
+		task.spawn(function()
+			while task.wait(0.4) do
+				if flag3 and not flag6 and not flag8 and not flag7 and not flag9 then
+					local curChar = v2 and v2.Character
+					local curHum = curChar and curChar:FindFirstChildOfClass("Humanoid")
+					if not curHum or curHum.Health > 30 then
+						local stealCandidate = fn7()
+						if stealCandidate and stealCandidate ~= v2 then
+							local sChar = stealCandidate.Character
+							local sHum = sChar and sChar:FindFirstChildOfClass("Humanoid")
+							if sHum and sHum.Health > 0 and sHum.Health <= 18 then
+								flag4 = false
+								fn19()
+								v2 = stealCandidate
+							end
+						end
+					end
+				end
+			end
+		end)
 
 		RunService.Heartbeat:Connect(function()
 			if not flag3 then
@@ -5114,7 +4161,6 @@ do
 					fn19()
 					v2 = fn7()
 				end
-
 				return
 			end
 
@@ -5135,7 +4181,12 @@ do
 				return
 			end
 
-			if localPlayer.PlayerGui.Bar.MagicHealth.Health.Bar.Size.X == UDim.new(1, 0) and not character2:FindFirstChildWhichIsA("ForceField") then
+			local ultBarReady = false
+			pcall(function()
+				ultBarReady = localPlayer.PlayerGui.Bar.MagicHealth.Health.Bar.Size.X == UDim.new(1, 0)
+			end)
+
+			if ultBarReady and not character2:FindFirstChildWhichIsA("ForceField") then
 				if not flag7 then
 					if flag4 then
 						flag4 = false
@@ -5146,12 +4197,10 @@ do
 
 					task.spawn(function()
 						local now2 = tick()
-
 						while true do
 							pcall(function()
 								localPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(150, -10000, 32)
 							end)
-
 							RunService.RenderStepped:Wait()
 							if not (tick() - now2 >= 1 or not flag7) then
 								continue
@@ -5166,7 +4215,6 @@ do
 					VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.G, false, game)
 					flag7 = false
 				end
-
 				return
 			end
 
@@ -5185,7 +4233,6 @@ do
 				if flag4 then
 					flag4 = false
 				end
-
 				fn19()
 				v2 = fn7()
 				return
@@ -5195,7 +4242,6 @@ do
 				if flag4 then
 					flag4 = false
 				end
-
 				fn19()
 				v2 = fn7()
 				return
@@ -5210,10 +4256,29 @@ do
 				if flag4 then
 					flag4 = false
 				end
-
 				fn19()
 				v2 = fn7()
 				return
+			end
+
+			if stuckTarget ~= v2 then
+				stuckTarget = v2
+				stuckTimer = tick()
+				stuckHealth = humanoid.Health
+			else
+				if humanoid.Health < stuckHealth - 1 then
+					stuckTimer = tick()
+					stuckHealth = humanoid.Health
+				elseif tick() - stuckTimer >= 12 then
+					ignoredTargets[v2] = tick() + 25
+					stuckTarget = nil
+					if flag4 then
+						flag4 = false
+					end
+					fn19()
+					v2 = fn7()
+					return
+				end
 			end
 
 			if character:FindFirstChild("AbsoluteImmortal") then
@@ -5227,11 +4292,9 @@ do
 					now = tick()
 				elseif tick() - now >= 5 or character:FindFirstChildOfClass("Humanoid") and character.Humanoid.Health <= 10 then
 					now = nil
-
 					if flag4 then
 						flag4 = false
 					end
-
 					fn19()
 					v2 = fn7()
 					return
@@ -5242,26 +4305,22 @@ do
 				if flag4 then
 					flag4 = false
 				end
-
 				fn19()
 				v2 = fn7()
 				return
 			end
 
 			local torso = character:FindFirstChild("Torso")
-
 			if not torso or torso.Transparency == 1 then
 				if flag4 then
 					flag4 = false
 				end
-
 				fn19()
 				v2 = fn7()
 				return
 			end
 
 			if not flag4 then
-				print("[Any TSB Farm] Targeting: " .. v2.Name)
 				flag4 = true
 				humanoid2.AutoRotate = false
 			end
@@ -5291,7 +4350,6 @@ do
 
 	local function fn23()
 		local VirtualUser = game:GetService("VirtualUser")
-
 		localPlayer.Idled:Connect(function()
 			pcall(function()
 				VirtualUser:CaptureController()
@@ -5314,24 +4372,6 @@ do
 		end
 	end)
 
-	task.spawn(function()
-		local thrown = workspace:FindFirstChild("Thrown")
-
-		if thrown then
-			for _, child in pairs(thrown:GetChildren()) do
-				if child.Name:lower():find("debris") or child.Name:lower() == "part" then
-					task.spawn(pcall, _deleteNew, child)
-				end
-			end
-
-			thrown.ChildAdded:Connect(function(child)
-				if child.Name:lower():find("debris") or child.Name:lower() == "part" then
-					task.spawn(pcall, _deleteNew, child)
-				end
-			end)
-		end
-	end)
-
 	task.wait(1)
 	fn20()
 	fn22()
@@ -5339,14 +4379,11 @@ do
 end
 
 task.spawn(function()
-	task.wait(1)
-
 	while true do
+		task.wait(300)
 		if v.webhookUrl and v.webhookUrl ~= "" then
 			pcall(fn6)
 		end
-
-		task.wait(30)
 	end
 end)
 
@@ -5354,14 +4391,11 @@ task.spawn(function()
 	while true do
 		if getgenv().desync then
 			local now = tick()
-
 			repeat
 				task.wait()
 			until tick() - now >= 20 or not getgenv().desync
-
 			getgenv().desync = nil
 		end
-
 		RunService.RenderStepped:Wait()
 	end
 end)
@@ -5370,7 +4404,6 @@ task.spawn(function()
 	while task.wait(0.25) do
 		local character = localPlayer.Character
 		local communicate = character and character:FindFirstChild("Communicate")
-
 		if communicate then
 			pcall(communicate.FireServer, communicate, { Goal = "Emote Spin" })
 		end
@@ -5379,10 +4412,9 @@ end)
 
 task.spawn(function()
 	while true do
-		if (#Players:GetPlayers() <= 7 or n8 >= 7) and not flag6 and not flag8 then
+		if #Players:GetPlayers() < 7 and not flag6 and not flag8 then
 			doHopServer()
 		end
-
 		task.wait(1)
 	end
 end)
@@ -5407,6 +4439,5 @@ end)
 
 if not ok then
 	getgenv().ScriptExecuted = nil
-	warn("[Any TSB Farm] Startup failed: " .. tostring(err))
 	error(err, 0)
 end
